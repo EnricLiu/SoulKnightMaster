@@ -1,0 +1,9 @@
+
+.*
+!.gitignore
+*.ref
+node_modules
+
+maafw_test/vela
+maafw_test/config
+maafw_test/debug
