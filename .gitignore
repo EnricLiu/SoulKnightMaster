@@ -1,9 +1,14 @@
-
 .*
 !.gitignore
 *.ref
 node_modules
+__pycache__
 
 maafw_test/vela
 maafw_test/config
 maafw_test/debug
+
+tools/psd_parser/res
+
+# conda env
+workenv
