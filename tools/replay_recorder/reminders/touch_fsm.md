@@ -1,0 +1,19 @@
+## TOUCH FSM
+::: mermaid
+graph TD;
+            START[单次事件完成];
+         TRACKING[等待更新坐标];
+      WAIT_BTN_UP[等待触摸结束];
+    WAIT_BTN_DOWN[等待触摸发生];
+    
+    START --ABS_MT_TRACKING_ID--> WAIT_BTN_DOWN;
+    WAIT_BTN_DOWN --BTN_TOUCH DOWN--> TRACKING;
+    TRACKING --ABS_MT_POSITION_X, _Y--> TRACKING;
+    TRACKING --SYN_REPORT--> START;
+
+    START --BTN_TOUCH DOWN--> TRACKING;
+    START --ABS_MT_TRACKING_ID=0xc350--> WAIT_BTN_UP;
+    WAIT_BTN_UP --BTN_TOUCH UP--> START;
+   
+:::
+
