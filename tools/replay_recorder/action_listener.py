@@ -99,13 +99,19 @@ class ActionListener:
             transport_timeout_s = 999999999
         )
 
+        # self._input_states = {
+        #     "KEY": {
+        #         "W": False,
+        #         "A": False,
+        #         "S": False,
+        #         "D": False
+        #     },
+        #     "TOUCH": {}
+        # }
+
+        key_bit_map = { "W": 3, "A": 2, "S": 1, "D": 0 }
         self._input_states = {
-            "KEY": {
-                "W": False,
-                "A": False,
-                "S": False,
-                "D": False
-            },
+            "KEY": 0b0000, # W A S D
             "TOUCH": {}
         }
         # "TOUCH": {"slot_id_1": { "X": x, "Y": y }, "slot_id_2": { "X": x, "Y": y }, ...}
@@ -149,11 +155,14 @@ class ActionListener:
                     case "KEY":
                         hardware, key_name = event_name.split("_")
                         if hardware == "KEY":
-                            if key_name not in self._input_states["KEY"]:
+                            if key_name not in key_bit_map:
                                 main_state = "fault"
                                 continue
 
-                            self._input_states["KEY"][key_name] = event_value == "DOWN"
+                            if event_value == "DOWN":
+                                self._input_states["KEY"] |= 1 << key_bit_map[key_name]
+                            else:
+                                self._input_states["KEY"] &= ~(1 << key_bit_map[key_name])
 
                         elif hardware == "BTN":
                             if key_name != "TOUCH":

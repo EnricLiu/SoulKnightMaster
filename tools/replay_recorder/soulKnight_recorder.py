@@ -45,13 +45,15 @@ class SoulKnightReplayRecorder:
         sr_config = config["ScreenRecorderConfig"]
         sr_timout = sr_config.get("recordTimeout", 5)
         # duration  = sr_config.get("recordDuration", 120)
-        instance.screen_recorder = ScreenRecorder.get_instance(instance_key, instance.adb, adb_workdir, sr_timout)
+        screen_adb = await instance.get_connected_adb_clone()
+        instance.screen_recorder = ScreenRecorder.get_instance(instance_key, screen_adb, adb_workdir, sr_timout)
 
         ######################  ActionListener Initialize ######################
         al_config = config["ActionListenerConfig"]
         regions = al_config.get("regions")
+        action_adb = await instance.get_connected_adb_clone()
         instance.action_listener = SoulKnightActionListener.get_instance(
-            instance_key, instance.adb,
+            instance_key, action_adb,
             get_region(**regions[  "joystick"]),
             get_region(**regions[   "btn_atk"]),
             get_region(**regions[ "btn_skill"]),
@@ -73,6 +75,16 @@ class SoulKnightReplayRecorder:
 
         self.screen_recorder: ScreenRecorder = None
         self.action_listener: SoulKnightActionListener = None
+
+    async def get_connected_adb_clone(self) -> AdbDeviceAsync:
+        addr = self.adb_addr()
+        port = self.adb_port()
+        protocol = TcpTransportAsync(addr, port)
+        adb = AdbDeviceAsync(protocol, default_transport_timeout_s=self.adb_timeout)
+        result = await adb.connect(read_timeout_s=SoulKnightReplayRecorder._CONN_TIMEOUT)
+        if not result or not adb.available:
+            raise Exception("adb connect failed")
+        return adb
 
     @staticmethod
     def check_initialized(func):
@@ -98,10 +110,10 @@ class SoulKnightReplayRecorder:
         record_start_time = None
         action_results = []
         def on_event_cb(*args, **kwargs):
-            print(self.action_listener.get_input_states())
+            # print(f"{str(time.time_ns()).zfill(15)[:-6]}")
             if record_start_time is None: return
             states = self.action_listener.get_action()
-            formatted_str = f"{str(time.time_ns() - record_start_time).zfill(15)[:-6]} | {states}\n"
+            formatted_str = f"{str(time.time_ns() - record_start_time).zfill(15)[:-3]} | {states}\n" # us timestamp
             action_results.append(formatted_str)
 
         def on_record_start_cb(*args, **kwargs):
@@ -119,12 +131,8 @@ class SoulKnightReplayRecorder:
         save_path.mkdir(parents=True, exist_ok=True)
         screen_task = asyncio.create_task(
             self.screen_recorder.record(screen_path, duration_s, later_timeout, on_record_start_cb, on_record_finish_cb))
-        
-        await asyncio.sleep(5)
 
         try:
-            action_task.print_stack()
-            screen_task.print_stack()
             record_result = await screen_task
         except KeyboardInterrupt:
             print("Recording Interrupted")
@@ -135,14 +143,11 @@ class SoulKnightReplayRecorder:
             pass
             # await self.action_listener.interrupt()
             # await listen_task
-        action_task.print_stack()
-        screen_task.print_stack()
-        print("[debug] 134")
+
         with open(action_path, "w", encoding="utf-8") as f:
             f.writelines(iter(action_results))
         
         await asyncio.sleep(1)
-
         return record_result
 
     # listen_task, record_task = await record(...)
@@ -158,9 +163,33 @@ class SoulKnightReplayRecorder:
     def adb_addr(self): return self.adb_protocol._host
 
 
+#          0
+#     -45     45
+# -90      0        90
+#    -135     135
+#         180
+
 class SoulKnightActionListener(ActionListener):
     _Instances = {}
-    KEY_ANGLE_MAP = { "W": 0, "A": -90, "S": 180, "D": 0 }
+    # W A S D
+    KEY_ANGLE_LOOKUP = {
+        0b0000: None,
+        0b1000:    0,   # W
+        0b0100:  -90,   # A
+        0b0010:  180,   # S
+        0b0001:   90,   # D
+        0b1100:  -45,   # W + A
+        0b1010: None,   # W + S
+        0b1001:   45,   # W + D
+        0b0110: -135,   # A + S
+        0b0101: None,   # A + D
+        0b0011:  135,   # S + D
+        0b1110:  -90,   # W + A + S
+        0b0111:  180,   # A + S + D
+        0b1011:   90,   # W + S + D
+        0b1101:    0,   # W + A + D
+        0b1111: None,
+    }
 
     def get_instance(key, adb: AdbDeviceAsync,
                      joystick_region:   RegionBase, 
@@ -196,15 +225,15 @@ class SoulKnightActionListener(ActionListener):
     def _parse_action_from_inputs(self, inputs: dict) -> dict:
         ret = {
             "movement": {
-                "is_movinng": False,
-                "direction":  0,
+                "is_moving": False,
+                "direction": 0,
             },
             "attack": False,
             "skill":  False,
             "weapon_switching": False,
         }
 
-        movement_inputs = inputs["KEY"]
+        movement_inputs = inputs["KEY"] # 0bxxxx
         touch_inputs  = inputs["TOUCH"]
 
         for _id, pos in touch_inputs.items():
@@ -218,16 +247,38 @@ class SoulKnightActionListener(ActionListener):
                 ret["weapon_switching"] = True
                 continue
             if self._joystick.contains(pos):
-                ret["movement"]["is_movinng"] = True
+                ret["movement"]["is_moving"] = True
                 ret["movement"]["direction"] = self._joystick.center().angle_to(pos)
 
-        if not ret["movement"]["is_movinng"]:
-            angle = [SoulKnightActionListener.KEY_ANGLE_MAP[key] for key, value in movement_inputs.items() if value]
-            if len(angle) > 0:
-                ret["movement"]["is_movinng"] = True
-                ret["movement"]["direction"] = sum(angle) / len(angle)
+        if not ret["movement"]["is_moving"]:
+            angle = SoulKnightActionListener.KEY_ANGLE_LOOKUP[movement_inputs]
+            ret["movement"]["is_moving"] = False if angle is None else True
+            ret["movement"]["direction"] = 0     if angle is None else angle
         
         return ret
+
+async def print_input_states(listener: ActionListener):
+    while True:
+        await asyncio.sleep(0.5)
+        res = listener.get_input_states()
+        print(f"Key: {res['KEY']}", end = "")
+        touch = [str(pos) for pos in res["TOUCH"].values()]
+        if touch == []: touch = ["None"]
+        print(f"\t Touch: {', '.join(touch)}")
+
+async def print_actions(listener: SoulKnightActionListener):
+    while True:
+        await asyncio.sleep(0.5)
+        print(listener.get_action())
+
+async def async_main6(config):
+    recorder = await SoulKnightReplayRecorder.get_instance(config)
+    action_listener = recorder.action_listener
+    
+    listen_task = asyncio.create_task(action_listener.listen())
+    print_task = asyncio.create_task(print_actions(action_listener))
+    
+    await listen_task, print_task
 
 async def async_main5(config):
     recorder = await SoulKnightReplayRecorder.get_instance(config)
@@ -248,20 +299,6 @@ if __name__ == '__main__':
 #     recorder = await SoulKnightReplayRecorder.get_instance("127.0.0.1", 16384)
 #     result = await recorder.start_screen_record(save_path=record_path, duration_s=5)
 #     print(result)
-
-# async def print_input_states(listener: ActionListener):
-#     while True:
-#         await asyncio.sleep(0.5)
-#         res = listener.get_input_states()
-#         print(f"Key: {res['KEY']}", end = "")
-#         touch = [str(pos) for pos in res["TOUCH"].values()]
-#         if touch == []: touch = ["None"]
-#         print(f"\t Touch: {', '.join(touch)}")
-
-# async def print_actions(listener: SoulKnightActionListener):
-#     while True:
-#         await asyncio.sleep(0.5)
-#         print(listener.get_action())
 
 # async def async_main2():
 #     try:
