@@ -64,7 +64,7 @@ class ScreenRecorder:
             lines = lines.strip()
             for line in lines.split("\n"):
                 line = line.strip()
-
+                print(f"[debug] screen recorder: {line}")
                 if "frame_size" not in result:
                     re_res = re.match(regexp_frame_info, line)
                     if re_res is None: continue
@@ -94,6 +94,7 @@ class ScreenRecorder:
                         cplt_result = int(res.group(1))
                         if cplt_result == 0:
                             if on_finish is not None: on_finish(result)
+                            break
                         else:
                             raise Exception("adb screen record failed")
                     else:

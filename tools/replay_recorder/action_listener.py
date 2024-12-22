@@ -179,7 +179,7 @@ class ActionListener:
         if on_finish is not None: on_finish(self._input_states)
         self._is_listening = False
 
-    async def interrupt(self):
+    # async def interrupt(self):
         # if self._listening_pid is None: raise RuntimeError("ActionListener: No process to interrupt")
         # print("shell start")
         # ret = await self._adb.shell(f"kill -INT {self._listening_pid}", transport_timeout_s=2, read_timeout_s=2, timeout_s=2)

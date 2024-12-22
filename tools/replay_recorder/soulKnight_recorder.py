@@ -86,46 +86,61 @@ class SoulKnightReplayRecorder:
     @check_initialized
     async def record(self, save_path: Path, duration_s:int=None, later_timeout:int=None):
         save_path = save_path.joinpath(f"record_{time.strftime('%Y%m%d-%H_%M_%S')}")
-        save_path.mkdir(parents=True, exist_ok=True)
         action_path = save_path.joinpath("action.txt")
         screen_path = save_path.joinpath("screen.mp4")
-        f_action = open(action_path, "w", encoding="utf-8")
+        
+        print(f"[INFO] SoulKnightReplayRecorder: ")
+        print(f"\t- Action record path: {action_path}")
+        print(f"\t- Screen record path: {screen_path}")
+        print(f"\t- Screen record duration: {duration_s}s")
+        print("\nRecording will start in 5 seconds...")
 
         record_start_time = None
+        action_results = []
         def on_event_cb(*args, **kwargs):
-            nonlocal record_start_time
-            if not record_start_time: return
+            print(self.action_listener.get_input_states())
+            if record_start_time is None: return
             states = self.action_listener.get_action()
-            formatted_str = f"{str(time.time_ns() - record_start_time).zfill(15)} | {states}"
-            print(formatted_str)
-            f_action.write(formatted_str + "\n")
+            formatted_str = f"{str(time.time_ns() - record_start_time).zfill(15)[:-6]} | {states}\n"
+            action_results.append(formatted_str)
 
         def on_record_start_cb(*args, **kwargs):
             nonlocal record_start_time
+            print(f"SoulKnightReplayRecorder: Start Recording!")
             record_start_time = time.time_ns()
 
         def on_record_finish_cb(*args, **kwargs):
             nonlocal record_start_time
+            print(f"Record Finished! Saving...")
             record_start_time = None
 
-        listen_task = asyncio.create_task(self.action_listener.listen(on_event=on_event_cb))
+        action_task = asyncio.create_task(self.action_listener.listen(on_event=on_event_cb))
+        await asyncio.sleep(5)
+        save_path.mkdir(parents=True, exist_ok=True)
+        screen_task = asyncio.create_task(
+            self.screen_recorder.record(screen_path, duration_s, later_timeout, on_record_start_cb, on_record_finish_cb))
+        
         await asyncio.sleep(5)
 
-        print(f"SoulKnightReplayRecorder: Start Recording!")
-        record_task = asyncio.create_task(self.screen_recorder.record(
-            screen_path, duration_s, later_timeout, on_record_start_cb, on_record_finish_cb))
-        
         try:
-            record_result = await record_task
+            action_task.print_stack()
+            screen_task.print_stack()
+            record_result = await screen_task
         except KeyboardInterrupt:
             print("Recording Interrupted")
             self.screen_recorder._save()
+        except Exception as e:
+            print(f"Error during recording: {e}")
         finally:
             pass
             # await self.action_listener.interrupt()
             # await listen_task
+        action_task.print_stack()
+        screen_task.print_stack()
+        print("[debug] 134")
+        with open(action_path, "w", encoding="utf-8") as f:
+            f.writelines(iter(action_results))
         
-        f_action.close()
         await asyncio.sleep(1)
 
         return record_result
@@ -222,6 +237,8 @@ async def async_main5(config):
 
 if __name__ == '__main__':
     config = json.load(open("config.json"))
+    policy = asyncio.get_event_loop_policy()
+    policy.get_event_loop().set_debug(True)
     asyncio.run(async_main5(config["SoulKnightReplayRecorderConfig"]))
 
 
