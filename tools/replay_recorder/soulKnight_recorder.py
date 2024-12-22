@@ -133,10 +133,10 @@ class SoulKnightReplayRecorder:
     # listen_task, record_task = await record(...)
     
 
-    @check_initialized
-    async def interrupt(self):
-        print("SoulKnightReplayRecorder: Interrupt")
-        results = await asyncio.gather(self.screen_recorder.interrupt(), self.action_listener.interrupt())
+    # @check_initialized
+    # async def interrupt(self):
+    #     print("SoulKnightReplayRecorder: Interrupt")
+    #     results = await asyncio.gather(self.screen_recorder.interrupt(), self.action_listener.interrupt())
 
 
     def adb_port(self): return self.adb_protocol._port
@@ -213,7 +213,19 @@ class SoulKnightActionListener(ActionListener):
                 ret["movement"]["direction"] = sum(angle) / len(angle)
         
         return ret
+
+async def async_main5(config):
+    recorder = await SoulKnightReplayRecorder.get_instance(config)
+    ret = await recorder.record(Path("./out/test"), 10, 2)
+    print(ret)
     
+
+if __name__ == '__main__':
+    config = json.load(open("config.json"))
+    asyncio.run(async_main5(config["SoulKnightReplayRecorderConfig"]))
+
+
+
 # async def async_main():
 #     record_path = Path(f"./out/screen_record_{time.time()}.mp4")
 #     recorder = await SoulKnightReplayRecorder.get_instance("127.0.0.1", 16384)
@@ -271,31 +283,3 @@ class SoulKnightActionListener(ActionListener):
 #     recorder = recorder.screen_recorder
 #     res = await recorder.record(Path("./out/screen_record_test.mp4"), 2, 3, lambda x: print("Start!"), lambda x: print("Finish!"))
 #     print(res)
-
-async def async_main5(config):
-    recorder = await SoulKnightReplayRecorder.get_instance(config)
-    ret = await recorder.record(Path("./out/test"), 10, 2)
-    print(ret)
-    
-
-if __name__ == '__main__':
-    config = json.load(open("config.json"))
-    asyncio.run(async_main5(config["SoulKnightReplayRecorderConfig"]))
-
-    # action_listener = SoulKnightActionListener(
-    #     joystick_region  = CircleRegion(Position( 240, 180), 269),
-    #     btn_atk_region   = CircleRegion(Position(1020, 140),  88),
-    #     btn_skill_region = CircleRegion(Position(1180, 120),  59),
-    #     btn_weapon_region= CircleRegion(Position(1180, 270),  60)
-    # )
-    # print(action_listener._parse_action_from_inputs({"KEY": {"W": False, "A": False, "S": False, "D": False}, "TOUCH": {"11": Position(1020, 140)}}))
-
-    # self.input_states = {
-    #         "KEY": {
-    #             "W": False,
-    #             "A": False,
-    #             "S": False,
-    #             "D": False
-    #         },
-    #         "TOUCH": {}
-    #     }

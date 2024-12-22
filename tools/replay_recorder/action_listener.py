@@ -18,7 +18,7 @@ class ActionListener:
         self._adb = adb
         self._last_touch_position = Position(-1, -1)
 
-        self._listening_pid = None
+        self._is_listening = False
 
     def get_input_states(self): return self._input_states
 
@@ -92,8 +92,6 @@ class ActionListener:
 
             # all unexpected trans-state fallback here
             return ret("fault", curr_slot)
-        
-        pid_sets = await self._list_getevent_pids()
 
         line_iter = self._adb.streaming_shell(
             "getevent -l",
@@ -119,14 +117,11 @@ class ActionListener:
         is_open = False
         regexp_splitter = r"^/dev/input/event4: (\S+) +(\S+) +([0-9a-zA-Z]+)" # lines like: "EV_ABS ABS_MT_POSITION_X 0000013f"
 
+        self._is_listening = True
         async for lines in line_iter:
             if not is_open:
                 is_open = True
-                pid_sets = await self._list_getevent_pids() - pid_sets
-                self._listening_pid = pid_sets.pop()
                 if on_open is not None: on_open()
-
-            if self._listening_pid is None: return
 
             lines = lines.strip()
             for line in lines.split('\n'):
@@ -182,22 +177,14 @@ class ActionListener:
                             continue
         
         if on_finish is not None: on_finish(self._input_states)
+        self._is_listening = False
 
     async def interrupt(self):
-        if self._listening_pid is None: raise RuntimeError("ActionListener: No process to interrupt")
-        print("shell start")
-        ret = await self._adb.shell(f"kill -INT {self._listening_pid}", transport_timeout_s=2, read_timeout_s=2, timeout_s=2)
-        print("shell ok")
-        if ret.strip() != "":
-            raise RuntimeError(f"ActionListener: Failed to interrupt pid {self._listening_pid}. {ret}")
-        self._listening_pid = None
+        # if self._listening_pid is None: raise RuntimeError("ActionListener: No process to interrupt")
+        # print("shell start")
+        # ret = await self._adb.shell(f"kill -INT {self._listening_pid}", transport_timeout_s=2, read_timeout_s=2, timeout_s=2)
+        # print("shell ok")
+        # if ret.strip() != "":
+        #     raise RuntimeError(f"ActionListener: Failed to interrupt pid {self._listening_pid}. {ret}")
+        # self._listening_pid = None
 
-    async def _list_getevent_pids(self, timeout:int=2) -> set[int]:
-        results = await self._adb.shell("pgrep -l \"getevent\"", timeout_s=timeout)
-        results = results.strip().split('\n')
-        ret = set()
-        for result in results:
-            result = result.split()
-            if len(result) != 2: continue
-            ret.add(int(result[0]))
-        return ret

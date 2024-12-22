@@ -21,12 +21,13 @@ class ScreenRecorder:
         self.adb_workdir = adb_workdir
         self.later_timeout = default_later_timeout
 
-        self._recording_pid = None
+        self._is_recording = False
         self._buf_adb_dir   = None
         self._save_path     = None
 
+    # is_recording means that the shell is running
     def is_recording(self):
-        return self._recording_pid is not None
+        return self._is_recording
 
     async def _save(self):
         if self._save_path is None: raise RuntimeError("ScreenRecorder: save_path is None")
@@ -41,7 +42,6 @@ class ScreenRecorder:
         if not self._adb.available:
             raise Exception("adb not available")
         
-        pid_sets = await self._list_screenrecord_pids()
         later_timeout = later_timeout if later_timeout else self.later_timeout
         time_limit_param = f"--time-limit {duration_s}" if duration_s else ""
         line_iter = self._adb.streaming_shell(
@@ -58,18 +58,12 @@ class ScreenRecorder:
         regexp_video_info = r"^Encoder stopping; recorded (\d+) frames in (\d+) seconds"
         regexp_finish     = r"^Broadcast completed: result=(\d+)"
 
-        is_open = False
-        is_start = False
+        is_start = False # means thay "Content area is \d+x\d+ at offset x=\d+ y=\d+" is recved
+        self._is_recording = True
         async for lines in line_iter:
             lines = lines.strip()
             for line in lines.split("\n"):
                 line = line.strip()
-
-                if not is_open:
-                    pid_sets = (await self._list_screenrecord_pids()) - pid_sets
-                    if not pid_sets: raise RuntimeError("ScreenRecorder: No recording process found")
-                    self._recording_pid = pid_sets.pop()
-                    is_open = True
 
                 if "frame_size" not in result:
                     re_res = re.match(regexp_frame_info, line)
@@ -107,29 +101,21 @@ class ScreenRecorder:
 
         await self._save()
         # await adb.shell(f"rm {buf_adb_dir}")
-        self._recording_pid = None
+        self._is_recording = False
 
         return result
     
     async def interrupt(self):
-        if self._recording_pid is None:
-            raise RuntimeError("ScreenRecorder: No process to interrupt")
-        try:
-            ret = await self._adb.shell(f"kill -INT {self._recording_pid}", timeout_s=2)
-            if ret.strip() != "":
-                raise RuntimeError(f"ScreenRecorder: Failed to interrupt pid {self._recording_pid}. {ret}")
-        except TimeoutError as e:
-            raise RuntimeError(f"ScreenRecorder: Timeout while interrupting pid {self._recording_pid}. {e}")
-        finally:
-            self._recording_pid = None
-            await self._save()
+        pass
+        # if self._recording_pid is None:
+        #     raise RuntimeError("ScreenRecorder: No process to interrupt")
+        # try:
+        #     ret = await self._adb.shell(f"kill -INT {self._recording_pid}", timeout_s=2)
+        #     if ret.strip() != "":
+        #         raise RuntimeError(f"ScreenRecorder: Failed to interrupt pid {self._recording_pid}. {ret}")
+        # except TimeoutError as e:
+        #     raise RuntimeError(f"ScreenRecorder: Timeout while interrupting pid {self._recording_pid}. {e}")
+        # finally:
+        #     self._recording_pid = None
+        #     await self._save()
 
-    async def _list_screenrecord_pids(self, timeout:int=2) -> set[int]:
-        results = await self._adb.shell("pgrep -l \"screenrecord\"", timeout_s=timeout)
-        results = results.strip().split('\n')
-        ret = set()
-        for result in results:
-            result = result.split()
-            if len(result) != 2: continue
-            ret.add(int(result[0]))
-        return ret
