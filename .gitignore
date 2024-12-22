@@ -1,10 +1,15 @@
 .*
 !.gitignore
-*.ref
 node_modules
 __pycache__
+# references
+*.ref
+# mp4
+*.mp4
+# test files
+test.*
+test
 
-maafw_test/vela
 maafw_test/config
 maafw_test/debug
 

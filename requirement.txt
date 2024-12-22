@@ -1,1 +1,7 @@
 psd_tools
+adb-shell[async]
+
+numpy
+matplotlib
+opencv-python
+pillow
