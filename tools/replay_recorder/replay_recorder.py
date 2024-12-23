@@ -97,7 +97,7 @@ class SoulKnightReplayRecorder:
 
     @check_initialized
     async def record(self, save_path: Path, duration_s:int=None, later_timeout:int=None):
-        save_path = save_path.joinpath(f"record_{time.strftime('%Y%m%d-%H_%M_%S')}_out")
+        save_path = save_path.joinpath(f"record_{time.strftime('%Y%m%d-%H_%M_%S')}-_out")
         action_path = save_path.joinpath("action.txt")
         screen_path = save_path.joinpath("screen.mp4")
         
@@ -110,9 +110,8 @@ class SoulKnightReplayRecorder:
         record_start_time = None
         action_results = []
         def on_event_cb(*args, **kwargs):
-            # print(f"{str(time.time_ns()).zfill(15)[:-6]}")
             if record_start_time is None: return
-            states = self.action_listener.get_action()
+            states = json.dumps(self.action_listener.get_action(), ensure_ascii=False)
             formatted_str = f"{str(time.time_ns() - record_start_time).zfill(15)[:-3]} | {states}\n" # us timestamp
             action_results.append(formatted_str)
 
