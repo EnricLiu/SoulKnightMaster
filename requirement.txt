@@ -1,4 +1,4 @@
-psd_tools
+psd-tools
 adb-shell[async]
 
 numpy
