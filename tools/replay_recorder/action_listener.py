@@ -1,8 +1,9 @@
 import re
 import asyncio
-from utils import Position, RegionBase
 
 from adb_shell.adb_device_async import AdbDeviceAsync
+
+from .utils import Position, RegionBase
 
 class ActionListener:
     def __init__(self, adb: AdbDeviceAsync):

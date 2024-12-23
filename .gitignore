@@ -7,8 +7,13 @@ __pycache__
 # mp4
 *.mp4
 # test files
+*_test.*
 test.*
 test
+# output files
+*_out.*
+out.*
+*_out
 
 maafw_test/config
 maafw_test/debug

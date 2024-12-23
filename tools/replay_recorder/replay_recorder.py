@@ -3,11 +3,11 @@ import json
 import time
 import asyncio
 from pathlib import Path
-from utils import Position, RegionBase, CircleRegion, get_region
-
-from action_listener import ActionListener
-from screen_recorder import ScreenRecorder
 from adb_shell.adb_device_async import AdbDeviceAsync, TcpTransportAsync
+
+from .action_listener import ActionListener
+from .screen_recorder import ScreenRecorder
+from .utils import Position, RegionBase, CircleRegion, get_region
 
 class SoulKnightReplayRecorder:
     _Instances = {}
@@ -97,7 +97,7 @@ class SoulKnightReplayRecorder:
 
     @check_initialized
     async def record(self, save_path: Path, duration_s:int=None, later_timeout:int=None):
-        save_path = save_path.joinpath(f"record_{time.strftime('%Y%m%d-%H_%M_%S')}")
+        save_path = save_path.joinpath(f"record_{time.strftime('%Y%m%d-%H_%M_%S')}_out")
         action_path = save_path.joinpath("action.txt")
         screen_path = save_path.joinpath("screen.mp4")
         
