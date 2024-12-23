@@ -162,13 +162,6 @@ class SoulKnightReplayRecorder:
     def adb_port(self): return self.adb_protocol._port
     def adb_addr(self): return self.adb_protocol._host
 
-
-#          0
-#     -45     45
-# -90      0        90
-#    -135     135
-#         180
-
 class SoulKnightActionListener(ActionListener):
     _Instances = {}
     # W A S D

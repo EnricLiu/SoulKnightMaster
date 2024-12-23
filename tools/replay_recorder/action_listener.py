@@ -7,12 +7,7 @@ from adb_shell.adb_device_async import AdbDeviceAsync
 class ActionListener:
     def __init__(self, adb: AdbDeviceAsync):
         self._input_states = {
-            "KEY": {
-                "W": False,
-                "A": False,
-                "S": False,
-                "D": False
-            },
+            "KEY": 0b0000,
             "TOUCH": {}
         }
         self._adb = adb
@@ -98,17 +93,7 @@ class ActionListener:
             read_timeout_s      = float("inf"),
             transport_timeout_s = 999999999
         )
-
-        # self._input_states = {
-        #     "KEY": {
-        #         "W": False,
-        #         "A": False,
-        #         "S": False,
-        #         "D": False
-        #     },
-        #     "TOUCH": {}
-        # }
-
+        
         key_bit_map = { "W": 3, "A": 2, "S": 1, "D": 0 }
         self._input_states = {
             "KEY": 0b0000, # W A S D
