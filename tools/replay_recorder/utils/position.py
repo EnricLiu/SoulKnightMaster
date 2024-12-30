@@ -8,7 +8,13 @@ class Position:
     
     def set_x(self, x: float): self.x = x
     def set_y(self, y: float): self.y = y
+    
+    def to_tuple(self):
+        return (self.x, self.y)
 
+    def round_to_tuple(self):
+        return (round(self.x), round(self.y))
+    
     def swap(self) -> 'Position':
         self.x, self.y = self.y, self.x
         return self

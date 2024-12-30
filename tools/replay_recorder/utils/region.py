@@ -33,6 +33,9 @@ class CircleRegion(RegionBase):
     def center(self) -> Position:
         return self._center
     
+    def radius(self) -> float:
+        return self._radius
+    
     def __str__(self) -> str:
         return f"CircleRegion(center={str(self._center)}, radius={self._radius})"
 

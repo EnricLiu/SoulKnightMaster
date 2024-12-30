@@ -1,108 +1,75 @@
-import cv2
 import time
-import json
-from tqdm import tqdm
 from pathlib import Path
 
-class SoulKnightAction:
-    _ACTION_MAP = {
-        "move":     0,
-        "attack":   1,
-        "skill":    2,
-        "weapon":   3
-    }
-    def __init__(self, action: list):
-        self._states, self._move_angle = SoulKnightAction._parse_action(action)
-    
-    @staticmethod
-    def _parse_action(maygbe_action: list):
-        try:
-            results  = {}
-            movement = maygbe_action["movement"]
-            move_angle = movement["direction"]
-            
-            results["move"]     = movement["is_moving"]
-            results["attack"]   = maygbe_action["attack"]
-            results["skill"]    = maygbe_action["skill"]
-            results["weapon"]   = maygbe_action["weapon_switching"]
-            
-        except Exception as e:
-            raise ValueError(f"SoulKnightAction: Invalid action: {maygbe_action}")
-        
-        states = 0b00000000
-        for k, v in results.items():
-            shift_num = SoulKnightAction._ACTION_MAP[k]
-            if shift_num is None: continue
-            if v: states = states | (0x01 << shift_num)
-            
-        return states, move_angle
-        
-    def is_move(self) -> bool:
-        return self._get_state_by_name("move")
-    def is_attack(self) -> bool:
-        return self._get_state_by_name("attack")
-    def is_skill(self) -> bool:
-        return self._get_state_by_name("skill")
-    def is_weapon(self) -> bool:
-        return self._get_state_by_name("weapon")
-    def get_move_angle(self) -> bool:
-        return self._move_angle if self.is_move() else None
-        
-    def _get_state_by_name(self, action_name) -> bool:
-        bit_mask = self._ACTION_MAP[action_name]
-        ret = (self._states & (0x01 << bit_mask)) != 0
-        return ret
-    
-    def __str__(self) -> str:
-        d = {
-            "move": self.is_move(),
-            "angle": self.get_move_angle(),
-            "attack": self.is_attack(),
-            "skill": self.is_skill(),
-            "weapon": self.is_weapon()
-        }
-        return json.dumps(d)
+import cv2
+from tqdm import tqdm
 
+from utils import get_region, CircleRegion
+from replay import SoulKnightReplay, SoulKnightAction
 
-class SoulKnightReplayViewer:
-    def __init__(self, replay_path: Path):
-        self._actions = {} # {time_us: action}
-        self._replay_path = replay_path
-        self._action_path, self._screen_path = self._extract_paths(replay_path)
+def view_replay(replay_path: Path, overlap_out: Path, config: list) -> None:
+    def draw_action(target_frame, action: SoulKnightAction, color: tuple=(0, 255, 0)):
+        def _draw_attack():
+            cv2.circle(target_frame, btn_atk_region.center().round_to_tuple(), 2, color, 2)
+        def _draw_skill():
+            cv2.circle(target_frame, btn_skill_region.center().round_to_tuple(), 2, color, 2)
+        def _draw_weapon():
+            cv2.circle(target_frame, btn_weapon_region.center().round_to_tuple(), 2, color, 2)
+        def _draw_movement(angle: float):
+            draw_center = joystick_region.center().offset_polar(joystick_region.radius(), angle)
+            cv2.circle(target_frame, draw_center.round_to_tuple(), 2, color, 2)
+            
+        if action.is_attack():
+            _draw_attack()
+        elif action.is_skill():
+            _draw_skill()
+        elif action.is_weapon():
+            _draw_weapon()
+        elif action.is_move():
+            _draw_movement(action.get_move_angle())
+            
+        return target_frame
+    
+    
+    regions = config["ActionListenerConfig"]["regions"]
+    joystick_region   = get_region(**regions[  "joystick"])
+    btn_atk_region    = get_region(**regions[   "btn_atk"])
+    btn_skill_region  = get_region(**regions[ "btn_skill"])
+    btn_weapon_region = get_region(**regions["btn_weapon"])
+    
+    replay = SoulKnightReplay(replay_path).load()
+    
+    # cv2 extract all the frames
+    video = cv2.VideoCapture(str(replay.screen_path()))
+    fps = video.get(cv2.CAP_PROP_FPS)
+    width  = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"fps: {fps}, width: {width}, height: {height}")
+    frame_duration_us = int(1000000 / fps)
+    
+    frames = []
+    while True:
+        ret, frame = video.read()
+        if not ret: break
+        frames.append(frame)
         
-    def parse_actions(self):
-        with open(self._action_path, "r", encoding="utf-8") as f:
-            for line in f.readlines():
-                line = line.strip()
-                if line == "": continue
-                
-                line = line.split(" | ")
-                if len(line) != 2:
-                    raise ValueError(f"ReplayViewer: Broken Actions: Invalid line {line}")
-                
-                time_us, action_str = line
-                maybe_action = json.loads(action_str)
-                action = SoulKnightAction(maybe_action)
-                
-                self._actions[time_us] = action
+    result_frames = []
+    for id, frame in tqdm(enumerate(frames)):
+        action = replay.get_action_by_time(id * frame_duration_us)
+        if action is None:
+            overlapped_frame = frame
+        else: 
+            overlapped_frame = draw_action(frame, action)
+            cv2.imshow("frame", overlapped_frame)
+            time.sleep(10086)
+            return
+        result_frames.append(overlapped_frame)
         
-    def _extract_paths(self, replay_path: Path):
-        if not replay_path.is_dir():
-            raise ValueError(f"ReplayViewer: {replay_path} not a exist dir.")
-        
-        action_path = replay_path / "action.txt"
-        screen_path = replay_path / "screen.mp4"
-        
-        if not action_path.is_file():
-            raise ValueError(f"ReplayViewer: {action_path} not exist.")
-        if not screen_path.is_file():
-            raise ValueError(f"ReplayViewer: {screen_path} not exist.")
-        
-        return action_path, screen_path
+    # reform into mp4
+    cv2.VideoWriter(str(overlap_out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)).write(cv2.hconcat(result_frames))    
 
 if __name__ == "__main__":
-    viewer = SoulKnightReplayViewer(Path("./out/record_20241223-18_48_58-_out"))
-    viewer.parse_actions()
-    k, v = list(viewer._actions.items())[1]
-    print(v)
+    import json
+    config = json.load(open("config.json"))
+    view_replay(Path("./out/record_20241223-18_48_58-_out"), Path("./out/record_20241223-18_48_58-_out"), config)
     

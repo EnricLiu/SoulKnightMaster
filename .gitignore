@@ -14,6 +14,8 @@ test
 *_out.*
 out.*
 *_out
+# datasets
+tools/replay_recorder/datasets
 
 maafw_test/config
 maafw_test/debug
