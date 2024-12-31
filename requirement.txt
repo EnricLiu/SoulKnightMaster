@@ -1,9 +1,14 @@
-psd-tools
 adb-shell[async]
+opencv-python
+psd-tools
 
+
+notebook
 numpy
 matplotlib
-opencv-python
 pillow
+polars
 torch
+torchinfo
 torchvision
+tqdm
