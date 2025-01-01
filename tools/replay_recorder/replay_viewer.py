@@ -1,75 +1,105 @@
+from os import cpu_count
 import time
 from pathlib import Path
 
 import cv2
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
-from utils import get_region, CircleRegion
+from utils import get_region, CircleRegion, Position
 from replay import SoulKnightReplay, SoulKnightAction
 
-def view_replay(replay_path: Path, overlap_out: Path, config: list) -> None:
-    def draw_action(target_frame, action: SoulKnightAction, color: tuple=(0, 255, 0)):
-        def _draw_attack():
-            cv2.circle(target_frame, btn_atk_region.center().round_to_tuple(), 2, color, 2)
-        def _draw_skill():
-            cv2.circle(target_frame, btn_skill_region.center().round_to_tuple(), 2, color, 2)
-        def _draw_weapon():
-            cv2.circle(target_frame, btn_weapon_region.center().round_to_tuple(), 2, color, 2)
-        def _draw_movement(angle: float):
-            draw_center = joystick_region.center().offset_polar(joystick_region.radius(), angle)
-            cv2.circle(target_frame, draw_center.round_to_tuple(), 2, color, 2)
+def view_replay(replay_path: Path, out_path: Path, config: list, buf_size: int=64, max_workers: int=cpu_count()) -> None:
+    print("[INFO]  ReplayViewer: Loading replay...")
+    regions_config = config["ActionListenerConfig"]["regions"]
+    
+    regions = {k: get_region(**regions_config[k]) for k in ["joystick", "btn_atk", "btn_skill", "btn_weapon"]}
+    regions_center = {k: v.center().swap().set_y(lambda r: 720 - r.y) for k, v in regions.items()}
+
+    def draw_action(target_frame, action: SoulKnightAction, color: tuple=(255, 0, 0)):
+        def _draw_attack(p: Position, size: int = 10):
+            cv2.circle(target_frame, p.round_to_tuple(), size, color, size)
+        def _draw_skill(p: Position, size: int = 10):
+            cv2.circle(target_frame, p.round_to_tuple(), size, color, size)
+        def _draw_weapon(p: Position, size: int = 10):
+            cv2.circle(target_frame, p.round_to_tuple(), size, color, size)
+        def _draw_movement(p: Position, radius: float, angle: float, size: int = 10):
+            draw_center = p.offset_polar(radius, angle)
+            cv2.circle(target_frame, draw_center.round_to_tuple(), size, color, size)
             
         if action.is_attack():
-            _draw_attack()
-        elif action.is_skill():
-            _draw_skill()
-        elif action.is_weapon():
-            _draw_weapon()
-        elif action.is_move():
-            _draw_movement(action.get_move_angle())
+            _draw_attack(regions_center["btn_atk"])
+        if action.is_skill():
+            _draw_skill(regions_center["btn_skill"])
+        if action.is_weapon():
+            _draw_weapon(regions_center["btn_weapon"])
+        if action.is_move():
+            _draw_movement(regions_center["joystick"], 60, action.get_move_angle())
             
         return target_frame
-    
-    
-    regions = config["ActionListenerConfig"]["regions"]
-    joystick_region   = get_region(**regions[  "joystick"])
-    btn_atk_region    = get_region(**regions[   "btn_atk"])
-    btn_skill_region  = get_region(**regions[ "btn_skill"])
-    btn_weapon_region = get_region(**regions["btn_weapon"])
-    
+
     replay = SoulKnightReplay(replay_path).load()
     
     # cv2 extract all the frames
     video = cv2.VideoCapture(str(replay.screen_path()))
-    fps = video.get(cv2.CAP_PROP_FPS)
+    if not video.isOpened():
+        raise Exception("Cannot open replay")
+    
+    fps  = video.get(cv2.CAP_PROP_FPS)
+    fnum = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     width  = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(f"fps: {fps}, width: {width}, height: {height}")
+    print(f"\t fps: {fps}, width: {width}, height: {height}")
     frame_duration_us = int(1000000 / fps)
+
+    print("[INFO]  ReplayViewer: replay loaded, extracting frames...")
+    out_path.mkdir(parents=True, exist_ok=True)
+    out_path = out_path / "overlapped.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 或者使用 'XVID'
+    out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
+
+    def draw_worker(frame_chunk) -> None:
+        frame_idx, frame = frame_chunk
+        action = replay.get_action_by_time(frame_idx * frame_duration_us)
+        frame = draw_action(frame, action)
+        return {"idx": frame_idx, "frame": frame}
     
-    frames = []
-    while True:
-        ret, frame = video.read()
-        if not ret: break
-        frames.append(frame)
-        
-    result_frames = []
-    for id, frame in tqdm(enumerate(frames)):
-        action = replay.get_action_by_time(id * frame_duration_us)
-        if action is None:
-            overlapped_frame = frame
-        else: 
-            overlapped_frame = draw_action(frame, action)
-            cv2.imshow("frame", overlapped_frame)
-            time.sleep(10086)
-            return
-        result_frames.append(overlapped_frame)
-        
-    # reform into mp4
-    cv2.VideoWriter(str(overlap_out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)).write(cv2.hconcat(result_frames))    
+    with tqdm(total=fnum) as pbar:
+        f_cnt = 0
+        if max_workers == 0:
+            ret, frame = video.read()
+            action = replay.get_action_by_time(f_cnt * frame_duration_us)
+            frame = draw_action(frame, action)
+            out.write(frame)
+            pbar.update(1)
+
+        else:
+            while f_cnt < fnum:
+                frame_chunks = []
+                for _ in range(buf_size):
+                    ret, frame = video.read()
+                    if not ret: 
+                        if f_cnt < fnum: raise Exception("Replay file is corrupted")
+                        break
+                    frame_chunks.append((f_cnt, frame))
+                    f_cnt += 1
+
+                with ThreadPoolExecutor(max_workers) as executor:
+                    results = executor.map(draw_worker, frame_chunks)
+                results = sorted(results, key=lambda x: x["idx"])
+                for result in results:
+                    out.write(result["frame"])
+                    pbar.update(1)
+
+    video.release()
+    out.release()
+    cv2.destroyAllWindows()
+
+    print(f"[INFO]  ReplayViewer: Done!\n\tOutput Path: {out_path.absolute()}")
 
 if __name__ == "__main__":
+
     import json
     config = json.load(open("config.json"))
-    view_replay(Path("./out/record_20241223-18_48_58-_out"), Path("./out/record_20241223-18_48_58-_out"), config)
+    view_replay(Path("./out/test/record_20241231-17_18_24-_out"), Path("./out/test/record_20241231-17_18_24-_out"), config, 1024, 8)
     

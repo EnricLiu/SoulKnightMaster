@@ -24,3 +24,6 @@ tools/psd_parser/res
 
 # conda env
 workenv
+
+# vscode
+*.code-workspace

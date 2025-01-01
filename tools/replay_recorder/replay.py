@@ -1,5 +1,6 @@
 import cv2
 import json
+import math
 import numpy as np
 import polars as pl
 from PIL import Image
@@ -15,6 +16,8 @@ class SoulKnightAction:
     }
     def __init__(self, action: list):
         self._states, self._move_angle = SoulKnightAction._parse_action(action)
+        if self.is_move():
+            self._move_angle = math.radians(self._move_angle - 90)
     
     def is_move(self) -> bool:
         return self._get_state_by_name("move")
@@ -78,7 +81,9 @@ class SoulKnightAction:
 
 
 class SoulKnightReplay:
-    def __init__(self, replay_path: Path):
+    def __init__(self, replay_path: Path, action_offset: int=-500_000):
+        self._action_offset = action_offset # us
+
         self._actions: dict[int, SoulKnightAction] = {} # {time_us: action}
         self._time_us_list: list[int] = []
         self._start_time: int = None
@@ -122,12 +127,12 @@ class SoulKnightReplay:
         
         #####################################################################
         
-        video = cv2.VideoCapture(str(replay.screen_path()))
-        self._frame_duration_us = int(1000000 / video.get(cv2.CAP_PROP_FPS))
-        self._frame_num     = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-        self._video_width   = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self._video_height  = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self._video = video
+        # video = cv2.VideoCapture(str(replay.screen_path()))
+        # self._frame_duration_us = int(1000000 / video.get(cv2.CAP_PROP_FPS))
+        # self._frame_num     = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        # self._video_width   = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        # self._video_height  = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # self._video = video
         
         self._is_loaded = True
         return self
@@ -156,6 +161,7 @@ class SoulKnightReplay:
     def get_action_by_time(self, time_us: int):
         if self._is_loaded == False:
             raise ValueError("ReplayViewer: Replay not loaded.")
+        time_us += self._action_offset
         
         head = 0
         tail = len(self._actions) - 1
