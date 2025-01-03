@@ -1,6 +1,8 @@
 from .replay_recorder import SoulKnightReplayRecorder
 from pathlib import Path
+from .utils import *
 import json
+
 
 __REPLAY_RECORDER_PATH: Path = Path(__file__).parent.absolute()
 

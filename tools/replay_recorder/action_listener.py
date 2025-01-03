@@ -39,11 +39,11 @@ class ActionListener:
                                     self._input_states["TOUCH"][curr_touch_slot] = self._last_touch_position
                                 return ret("tracking", curr_slot)
                     
-                        # ABS_MT_TRACKING_ID 0xc350 -> "wait_btn_up"
+                        # ABS_MT_TRACKING_ID 0xc350|0xc352 -> "wait_btn_up"
                         # ABS_MT_TRACKING_ID others -> "wait_btn_down"
                         case "ABS_MT_TRACKING_ID":
                             event_value = int(event_value, 16)
-                            if event_value == 0xc350:
+                            if 0xc400 >= event_value >= 0xc300:
                                 return ret("wait_btn_up", curr_slot)
                             else:
                                 curr_slot = event_value
@@ -118,6 +118,10 @@ class ActionListener:
             lines = lines.strip()
             for line in lines.split('\n'):
                 line = line.strip()
+                
+                # DEBUG
+                # print(line)
+                
                 result = re.match(regexp_splitter, line)
                 if result is None: continue
 
@@ -183,3 +187,27 @@ class ActionListener:
         #     raise RuntimeError(f"ActionListener: Failed to interrupt pid {self._listening_pid}. {ret}")
         # self._listening_pid = None
 
+
+async def __test_main():
+    import json
+    from pathlib import Path
+    from adb_shell.adb_device_async import AdbDeviceAsync, TcpTransportAsync
+
+    config = json.load(open("config.json"))
+    adb_config = config["ADBConfig"]
+    addr    = adb_config.get("adbHost", "127.0.0.1")
+    port    = adb_config.get("adbPort", 16384)
+    adb_protocol = TcpTransportAsync(addr, port)
+    adb = AdbDeviceAsync(adb_protocol, default_transport_timeout_s=5)
+    
+    result = await adb.connect(read_timeout_s=1)
+    if not result or not adb.available:
+        raise Exception("adb connect failed")
+
+    listener = ActionListener(adb=adb)
+    
+    await listener.listen()
+
+
+if __name__ == "__main__":
+    asyncio.run(__test_main())
