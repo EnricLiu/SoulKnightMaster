@@ -86,7 +86,7 @@ def custom_loss(outputs, targets):
 
 # 冻结部分模型
 def freeze_model_weights(model, freeze_until_layer=15):
-    print(f"model_features: {model.features}")
+    # print(f"model_features: {model.features}")
     for i in range(6):
         for name, param in model.features[i].named_parameters():
             param.requires_grad = False
@@ -131,11 +131,11 @@ def train(model, device, dataset, optimizer,criterion,
     layer_num = 15
     try:
         for epoch in range(num_epochs):
-            if epoch // 20 == 0 and epoch != 0:
+            if epoch % 20 == 0 and epoch != 0:
                 freeze_model_weights(model.effi_net, freeze_until_layer=layer_num)
                 layer_num -= 1
                 print(f"freeze layer {layer_num}")
-            with tqdm(total=n_train, desc=f'Epoch {epoch}/{num_epochs}') as pbar:
+            with tqdm(total=n_train, desc=f'[Train] Epoch {epoch}/{num_epochs}') as pbar:
                 train_loss = 0
                 for images in train_loader:
                     image = images["image"].to(device)
@@ -154,7 +154,7 @@ def train(model, device, dataset, optimizer,criterion,
                     pbar.set_postfix(**{'loss (batch)': loss.item()})
 
             train_loss /= n_train
-            train_loss = train_loss*batch_size
+            train_loss *= batch_size
 
             print(f"Epoch {epoch}, Total Loss: {train_loss}")
 
@@ -164,32 +164,33 @@ def train(model, device, dataset, optimizer,criterion,
             with torch.no_grad():
                 all_y_true = []  # 存储所有批次的真实标签
                 all_y_pred = []  # 存储所有批次的预测结果
-                for i, images in tqdm(enumerate(val_loader)):
-                    image = images["image"].to(device)
-                    action = images["action"][:, train_number].to(device)
+                with tqdm(total=n_val, desc=f'[Val] Epoch {epoch}/{num_epochs}') as pbar:
+                    for images in val_loader:
+                        image = images["image"].to(device)
+                        action = images["action"][:, train_number].to(device)
 
+                        output = model(image)
+                        # output_concat = torch.cat(output, dim=1)
+                        # print(action.shape)
+                        # print(action.type())
+                        # for i, elem in enumerate(action):
+                        #     print(f"action[{i}]: type = {type(elem)}, content = {elem}")
+                        # for i, elem in enumerate(output_concat):
+                        #     print(f"output_concat[{i}]: type = {type(elem)}, content = {elem}")
+                        loss = criterion(output, action)
+                        val_loss += loss.item()
+                        #
+                        # action_cpu = [t.cpu() for t in action]
+                        # action_numpy = [t.numpy() for t in action_cpu]
+                        # all_y_true.extend(action_numpy)
+                        # output_cpu = [t.cpu() for t in output_concat]
+                        # output_numpy = [t.numpy() for t in output_cpu]
+                        # all_y_pred.extend(output_numpy)
+                        pbar.update(batch_size)
+                        pbar.set_postfix(**{'loss (batch)': loss.item()})
 
-                    output = model(image)
-                    # output_concat = torch.cat(output, dim=1)
-                    # print(action.shape)
-                    # print(action.type())
-                    # for i, elem in enumerate(action):
-                    #     print(f"action[{i}]: type = {type(elem)}, content = {elem}")
-                    # for i, elem in enumerate(output_concat):
-                    #     print(f"output_concat[{i}]: type = {type(elem)}, content = {elem}")
-                    loss = criterion(output, action)
-                    val_loss += loss.item()
-                    #
-                    # action_cpu = [t.cpu() for t in action]
-                    # action_numpy = [t.numpy() for t in action_cpu]
-                    # all_y_true.extend(action_numpy)
-                    # output_cpu = [t.cpu() for t in output_concat]
-                    # output_numpy = [t.numpy() for t in output_cpu]
-                    # all_y_pred.extend(output_numpy)
-
-
-            val_loss /= len(val_set)
-            val_loss = val_loss*batch_size
+            val_loss /= n_val
+            val_loss *= batch_size
             print(f"Epoch {epoch}, Validation Loss: {val_loss}")
 
 
@@ -211,7 +212,7 @@ def train(model, device, dataset, optimizer,criterion,
 
     except Exception as e:
         print(f"Error: {e}")
-        raise e
+        # raise e
 
     finally:
         print("Finished training")
@@ -229,8 +230,8 @@ if __name__ == "__main__":
     print("device:", device)
     image_path = Path(r'./datasets/merge/merged_20250227-00_37_48-_out')
     action_df = pl.read_csv(r'./datasets/merge/merged_20250227-00_37_48-_out/dataset.csv')
-    # model = MainModel()
-    model = torch.load("../ckpt/1740588758-ln=move-loss=0.346-e5.pth")
+    model = MainModel()
+    # model = torch.load("../ckpt/1740588758-ln=move-loss=0.346-e5.pth")
     criterion = custom_loss
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
 
