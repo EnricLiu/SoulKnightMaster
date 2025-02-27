@@ -1,0 +1,17 @@
+[package]
+name = "cluster"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+futures = "0.3.31"
+tokio = { version = "1.43.0", features = ["full"] }
+dashmap = "6.1.0"
+
+chrono = "0.4.39"
+anyhow = "1.0.96"
+thiserror = "2.0.11"
+
+adb_client = { version = "2.1.7" }
+image = "0.25.5"
+
