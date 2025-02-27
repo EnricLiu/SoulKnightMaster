@@ -1,4 +1,3 @@
-import re
 import asyncio
 
 from adb_shell.adb_device_async import AdbDeviceAsync

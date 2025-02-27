@@ -127,12 +127,12 @@ class SoulKnightReplay:
         
         #####################################################################
         
-        # video = cv2.VideoCapture(str(replay.screen_path()))
-        # self._frame_duration_us = int(1000000 / video.get(cv2.CAP_PROP_FPS))
-        # self._frame_num     = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-        # self._video_width   = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        # self._video_height  = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        # self._video = video
+        video = cv2.VideoCapture(str(self.screen_path()))
+        self._frame_duration_us = int(1000000 / video.get(cv2.CAP_PROP_FPS))
+        self._frame_num     = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        self._video_width   = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self._video_height  = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self._video = video
         
         self._is_loaded = True
         return self
@@ -206,14 +206,12 @@ class SoulKnightReplay:
         
         return action_path, screen_path
     
+def make_dataset(replay_path: Path, out_path: Path):
+    replay = SoulKnightReplay(replay_path)
+    out_path = Path(out_path)
     
-if __name__ == "__main__":
-    replay = SoulKnightReplay(Path("./out/record_20241223-18_48_58-_out"))
-    replay.load()
-
-    # print(replay.get_action_by_time(94741134))
-    out_path = Path("./datasets/record_20241223-18_48_58-_out")
     out_path.mkdir(parents=True, exist_ok=True)
+    replay.load()
     
     df = pl.DataFrame(schema = {
         "img_dir": pl.Utf8,
@@ -223,6 +221,7 @@ if __name__ == "__main__":
         "skill": pl.Boolean,
         "weapon": pl.Boolean
     })
+    
     for frame_idx, img, action in tqdm(replay.gen_dataset(), total=replay.get_frame_num()):
         img_dir = f"{frame_idx+1}.npy"
         img_dir_df = pl.DataFrame({"img_dir": [str(img_dir)]})
@@ -233,4 +232,13 @@ if __name__ == "__main__":
         np.save(img_dir, img_result)
         
     df.write_csv(out_path / "dataset.csv")
+
+if __name__ == "__main__":
+    # replay_path = Path("./out/record_20241223-18_48_58-_out")
+    # out_path = Path("./datasets/record_20241223-18_48_58-_out")
+    
+    replay_path = Path("C:\\Users\\EnricLiu\\Desktop\\Projects\\SoulKnightMaster\\model\\feat_ext\\pre_train_resnet\\replays\\record_20241231-17_28_49-_out")
+    out_path = Path("C:\\Users\\EnricLiu\\Desktop\\Projects\\SoulKnightMaster\\model\\feat_ext\\pre_train_resnet\\datasets\\origin\\record_20241231-17_28_49-_out")
+    
+    make_dataset(replay_path, out_path)
 
