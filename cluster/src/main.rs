@@ -1,7 +1,9 @@
 mod adb;
+mod utils;
 
 use dashmap::DashMap;
 use std::net::{SocketAddrV4, Ipv4Addr};
+use std::str::FromStr;
 use std::sync::LazyLock;
 use adb_client::{ADBServer, ADBDeviceExt, ADBServerDevice};
 
@@ -43,13 +45,34 @@ fn main() {
 
 #[test]
 fn test() -> Result<(), Box<dyn std::error::Error>> {
+    // use std::path::Path;
     let mut server = ADB_SERVERS.get_mut(&*ADB_SERVER_DEFAULT_IP).unwrap();
     let res = server.devices_long()?;
     println!("{:?}", res);
 
     // let mut server = ADBServer::default();
-    let mut device = server.get_device_by_name("localhost:16384")?;
-    device.shell_command(&["df", "-h"], &mut std::io::stdout());
+    let mut device = server.get_device_by_name("127.0.0.1:16384")?;
+    println!("{:?}", device);
+    // let mut device = ADBServerDevice::new(
+    //     "127.0.0.1:16384".to_string(), Some(SocketAddrV4::from_str("127.0.0.1:5037").unwrap()));
+    // println!("{:?}", device);
+    // let res = device.framebuffer(&Path::new("test.png"))?;
+    let res = device.framebuffer_bytes()?.len();
     // drop(server);
+    println!("{:?}", res);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_async() -> Result<(), Box<dyn std::error::Error>> {
+    use std::path::Path;
+    let mut server = ADB_SERVERS.get_mut(&*ADB_SERVER_DEFAULT_IP).unwrap();
+    let res = server.devices_long().unwrap();
+    println!("{:?}", res);
+    
+    let mut device = server.get_device_by_name("127.0.0.1:16384")?;
+    tokio::task::spawn_blocking(move || {
+        device.framebuffer(&Path::new("test.png")).unwrap();
+    }).await.unwrap();
     Ok(())
 }

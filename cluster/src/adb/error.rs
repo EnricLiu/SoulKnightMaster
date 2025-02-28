@@ -14,7 +14,7 @@ pub enum Error {
     #[error("PoolBusy: no service available: {0}")]
     PoolBusy(SocketAddrV4),
 
-    #[error("Failed to unwrap Arc: {0}")]
+    #[error("Failed to unwrap Arc")]
     ArcFailedUnwrap(),
 
     #[error("{0}")]
