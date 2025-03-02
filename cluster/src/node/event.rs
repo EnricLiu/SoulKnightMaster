@@ -1,45 +1,6 @@
 use std::hash::Hash;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u32)]
-pub enum NodeEvent {
-    AbsMtTrackingId { slot_id: u32 } = 0x0039,
-    AbsMtSlot { slot_id: u32 } = 0x002f,
-
-    AbsMtPositionX(u32) = 0x0035,
-    AbsMtPositionY(u32) = 0x0036,
-
-    Key(Key, KeyValue),
-    BtnTouch(KeyValue)  = 0x014A,
-
-    SynReport(u32)   = 0x0000,
-}
-
-impl NodeEvent {
-    pub(crate) fn value(&self) -> u32 {
-        match self {
-            Self::Key(k, _) => *k as u32,
-            _ => unsafe { std::mem::transmute::<Self, [u32;3]>(*self)[0] }
-        }
-    }
-
-    pub(crate)fn key_value(&self) -> u32 {
-        match self {
-            NodeEvent::AbsMtTrackingId { slot_id } => *slot_id,
-            NodeEvent::AbsMtSlot { slot_id } => *slot_id,
-            
-            NodeEvent::AbsMtPositionX(x) => *x,
-            NodeEvent::AbsMtPositionY(y) => *y,
-            
-            NodeEvent::Key(_, v) => *v as u32,
-            NodeEvent::BtnTouch(v) => *v as u32,
-            
-            NodeEvent::SynReport(v) => *v,
-        }   
-    }
-}
-
 // from /system/usr/keylayout/qwerty.kl
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -153,7 +114,6 @@ pub enum KeyValue {
     Up = 0,
     Down = 1,
 }
-
 impl TryFrom<i32> for KeyValue {
     type Error = String;
 
@@ -165,7 +125,6 @@ impl TryFrom<i32> for KeyValue {
         }
     }
 }
-
 impl FromStr for KeyValue {
     type Err = String;
 
@@ -186,39 +145,73 @@ pub enum NodeEventType {
     EvAbs = 3,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum NodeEvent {
+    AbsMtTrackingId { slot_id: u32 } = 0x0039,
+    AbsMtSlot { slot_id: u32 } = 0x002f,
+
+    AbsMtPositionX(u32) = 0x0035,
+    AbsMtPositionY(u32) = 0x0036,
+
+    Key(Key, KeyValue),
+    BtnTouch(KeyValue)  = 0x014A,
+
+    SynReport(u32)   = 0x0000,
+}
+
 impl NodeEvent {
-    fn ev_type(&self) -> NodeEventType {
+    pub(crate) fn value(&self) -> u32 {
         match self {
-            Self::SynReport(_)
-                => NodeEventType::EvSyn,
-            Self::Key(_, _) | Self::BtnTouch(_)
-                => NodeEventType::EvKey,
-            Self::AbsMtTrackingId { .. } | Self::AbsMtSlot { .. }
-                | Self::AbsMtPositionX(_) | Self::AbsMtPositionY(_) 
-                => NodeEventType::EvAbs,
+            Self::Key(k, _) => *k as u32,
+            _ => unsafe { std::mem::transmute::<Self, [u32;3]>(*self)[0] }
         }
     }
 
-    pub fn to_command(&self, ev_device: &str) -> [String; 5] {
-        [
-            "sendevent".to_string(),
-            ev_device.to_string(),
-            (self.ev_type() as u32).to_string(),
-            self.value().to_string(),
-            self.key_value().to_string(),
-        ]
+    pub(crate) fn key_value(&self) -> u32 {
+        match self {
+            NodeEvent::AbsMtTrackingId { slot_id } => *slot_id,
+            NodeEvent::AbsMtSlot { slot_id } => *slot_id,
+            
+            NodeEvent::AbsMtPositionX(x) => *x,
+            NodeEvent::AbsMtPositionY(y) => *y,
+            
+            NodeEvent::Key(_, v) => *v as u32,
+            NodeEvent::BtnTouch(v) => *v as u32,
+            
+            NodeEvent::SynReport(v) => *v,
+        }   
     }
 
-    pub fn to_cmd(&self) -> [u32; 3] {
-        [self.ev_type() as u32, self.value(), self.key_value()]
+    pub(crate) fn ev_type(&self) -> NodeEventType {
+        match self {
+            Self::SynReport(_) => NodeEventType::EvSyn,
+            Self::Key(_, _)
+            | Self::BtnTouch(_) => NodeEventType::EvKey,
+            Self::AbsMtTrackingId { .. }
+            | Self::AbsMtSlot { .. }
+            | Self::AbsMtPositionX(_)
+            | Self::AbsMtPositionY(_) => NodeEventType::EvAbs,
+        }
+    }
+
+    pub fn to_command(&self) -> String {
+        format!(
+            "{} {} {}",
+            self.ev_type() as u32,
+            self.value(),
+            self.key_value(),
+        )
     }
 }
+
+
 
 #[test]
 fn event() -> Result<(), Box<dyn std::error::Error>> {
     // let event = NodeEvent::Key(Key::W, KeyValue::Down);
     let event = NodeEvent::AbsMtPositionY(123);
-    println!("{:?}", event.to_command("/dev/input/event4"));
+    println!("{:?}", event.to_command());
 
     // let mut event_command = EventCommand::new(String::from("/dev/input/event0"));
     // event_command.append(event);
