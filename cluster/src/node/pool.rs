@@ -5,25 +5,26 @@ use std::sync::Arc;
 use adb_client::{ADBDeviceExt, ADBServerDevice};
 use tokio::sync::{Mutex};
 
-use crate::adb::error::Error;
+use crate::node::error::Error;
+use crate::utils::log;
 
-pub struct ADBDevicePool<const MAX_POOL_SIZE: usize> {
+pub struct DeviceConnPool<const MAX_POOL_SIZE: usize> {
     conns: Mutex<VecDeque<Arc<ADBServerDevice>>>,
     device_iden: String,
     server_addr: SocketAddrV4,
 }
 
-impl<const MAX_POOL_SIZE: usize> Default for ADBDevicePool<MAX_POOL_SIZE> {
+impl<const MAX_POOL_SIZE: usize> Default for DeviceConnPool<MAX_POOL_SIZE> {
     fn default() -> Self {
         let device_iden = "127.0.0.1:16384".to_string();
         let server_addr = SocketAddrV4::from_str("127.0.0.1:5037").unwrap();
-        ADBDevicePool::new(device_iden, server_addr)
+        DeviceConnPool::new(device_iden, server_addr)
     }
 }
 
-impl<const MAX_POOL_SIZE: usize> ADBDevicePool<MAX_POOL_SIZE> {
+impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
     pub fn new(device_iden: String, server_addr: SocketAddrV4) -> Self {
-        ADBDevicePool {
+        DeviceConnPool {
             conns: Mutex::new(VecDeque::with_capacity(MAX_POOL_SIZE)),
             device_iden,
             server_addr,
@@ -69,7 +70,7 @@ impl<const MAX_POOL_SIZE: usize> ADBDevicePool<MAX_POOL_SIZE> {
         let mut conns = self.conns.lock().await;
         if conns.len() < MAX_POOL_SIZE {
             conns.push_back(conn);
-            println!("GIVEN BACK!!");
+            log("GIVEN BACK!!");
         }
     }
     
@@ -86,7 +87,7 @@ impl<const MAX_POOL_SIZE: usize> ADBDevicePool<MAX_POOL_SIZE> {
 
 #[tokio::test]
 async fn test() -> Result<(), Error> {
-    let pool: ADBDevicePool<32> = ADBDevicePool::default();
+    let pool: DeviceConnPool<32> = DeviceConnPool::default();
     let conn = pool.get().await?;
     let mut conn = Arc::into_inner(conn).unwrap();
     let res = conn.framebuffer_bytes()?;

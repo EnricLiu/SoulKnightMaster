@@ -1,11 +1,12 @@
-mod adb;
+mod node;
 mod utils;
+mod server;
 
 use dashmap::DashMap;
 use std::net::{SocketAddrV4, Ipv4Addr};
-use std::str::FromStr;
 use std::sync::LazyLock;
 use adb_client::{ADBServer, ADBDeviceExt, ADBServerDevice};
+use tokio::task::spawn_blocking;
 
 static ADB_SERVER_DEFAULT_IP: LazyLock<SocketAddrV4> = LazyLock::new(|| {
     SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5037)
@@ -23,7 +24,7 @@ pub struct Cluster {
 
 // impl Cluster {
 //     pub fn get_device(&self, name: &str) -> Option<AdbConn> {
-//         self.adb.get(name).map(|x| x.clone())
+//         self.node.get(name).map(|x| x.clone())
 //     }
 // }
 
@@ -39,9 +40,36 @@ pub struct AdbConn {
     conn: ADBServerDevice,
 }
 
-fn main() {
-    println!("Hello, world!");
+// fn main() {
+//     println!("Hello, world!");
+// }
+
+#[tokio::main]
+async fn main() -> Result<(), crate::node::error::Error> {
+    let mut ctrl: node::controller::Node<4> = node::controller::Node::default();
+    ctrl.connect().await?;
+
+    let mut conn = ctrl.get_conn().await?;
+    let mut task = spawn_blocking(move || {
+        conn.shell_command(&["getevent", "/dev/input/event4"],&mut node::controller::EventParser {})?;
+        Ok::<(), crate::node::error::Error>(())
+    });
+
+    tokio::select! {
+        _ = & mut task => {
+            println!("task done");
+        },
+        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+            println!("timeout, trying to abort!");
+            task.abort();
+        }
+    }
+
+
+    // conn.shell(&mut cursor, Box::new(EventParser{}))?;
+    Ok(())
 }
+
 
 #[test]
 fn test() -> Result<(), Box<dyn std::error::Error>> {
