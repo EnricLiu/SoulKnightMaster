@@ -145,7 +145,7 @@ impl<'a> ActionFactory<'a> {
 
 #[tokio::test]
 async fn action() -> Result<(), Box<dyn std::error::Error>> {
-    let mut action = ActionFactory::new("/dev/input/event4");
+    let action = ActionFactory::new("/dev/input/event4");
     let action = action.get_touch_down_action("joystick", Position::new(100, 100)).await;
     println!("{:?}", action.cmd());
     Ok(())

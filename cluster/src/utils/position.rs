@@ -1,7 +1,8 @@
 
 use std::ops::{Add, Sub, Mul, Div};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Position<N>
     where N:
         Copy +
@@ -181,6 +182,70 @@ impl<N> Position<N>
             x: self.y,
             y: self.x,
         }
+    }
+}
+
+impl Default for Position<f32> {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+}
+
+impl Default for Position<f64> {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+}
+
+impl Default for Position<u8> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<u16> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<u32> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<u64> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<usize> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+
+impl Default for Position<i8> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<i16> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<i32> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<i64> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Default for Position<isize> {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
     }
 }
 
