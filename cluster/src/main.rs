@@ -1,6 +1,7 @@
 mod node;
 mod utils;
 mod server;
+mod soul_knight;
 
 use dashmap::DashMap;
 use std::net::{SocketAddrV4, Ipv4Addr};
@@ -46,12 +47,12 @@ pub struct AdbConn {
 
 #[tokio::main]
 async fn main() -> Result<(), crate::node::error::Error> {
-    let mut ctrl: node::controller::Node<4> = node::controller::Node::default();
+    let mut ctrl: node::Node<4> = node::Node::default();
     ctrl.connect().await?;
 
     let mut conn = ctrl.get_conn().await?;
     let mut task = spawn_blocking(move || {
-        conn.shell_command(&["getevent", "/dev/input/event4"],&mut node::controller::EventParser {})?;
+        conn.shell_command(&["getevent", "/dev/input/event4"],&mut node::EventParser {})?;
         Ok::<(), crate::node::error::Error>(())
     });
 
