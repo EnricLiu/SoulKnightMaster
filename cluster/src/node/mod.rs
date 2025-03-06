@@ -55,25 +55,25 @@ impl From<String> for ShellCommand<'_> {
 }
 
 
-pub struct Node<'a, const POOL_SIZE: usize> {
-    iden:   &'a str,
+pub struct Node<const POOL_SIZE: usize> {
+    iden:   String,
     pending_cnt: AtomicUsize,
     pool:   Arc<Mutex<DeviceConnPool<POOL_SIZE>>>,
 
-    action_man: ActionFactory<'a>,
+    action_man: ActionFactory,
 }
 
-impl<const POOL_SIZE: usize> Default for Node<'_, POOL_SIZE> {
+impl<const POOL_SIZE: usize> Default for Node<POOL_SIZE> {
     fn default() -> Self {
         let pool = DeviceConnPool::default();
         Node::new(pool, "/dev/input/event4")
     }
 }
 
-impl<'a, const POOL_SIZE: usize> Node<'a, POOL_SIZE> {
-    pub fn new(pool: DeviceConnPool<POOL_SIZE>, ev_device: &'a str) -> Self {
+impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
+    pub fn new(pool: DeviceConnPool<POOL_SIZE>, ev_device: &str) -> Self {
         let ret = Node {
-            iden:           "default",
+            iden:           "default".to_string(),
             pool:           Arc::new(Mutex::new(pool)),
             action_man:     ActionFactory::new(ev_device),
             pending_cnt:    AtomicUsize::new(0),
@@ -174,7 +174,7 @@ impl<'a, const POOL_SIZE: usize> Node<'a, POOL_SIZE> {
     }
 }
 
-impl<'a, const POOL_SIZE: usize> Node<'a, POOL_SIZE> {
+impl<'a, const POOL_SIZE: usize> Node<POOL_SIZE> {
     pub(crate) async fn send_action(&self, action: &ShellCommand<'_>) -> Result<(), Error> {
         let mut conn = self.get_conn().await?;
         let command = action.to_string();

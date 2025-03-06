@@ -2,6 +2,7 @@ use std::net::SocketAddrV4;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use image::{ImageBuffer, Rgba};
+use tokio::task::JoinHandle;
 use crate::node::error::Error;
 use crate::node::Node as InnerNode;
 use crate::node::pool::DeviceConnPool;
@@ -40,7 +41,7 @@ impl NodeState {
         Some(f64::from_bits(u))
     }
     
-    pub fn set_move(&self, angle: Option<f64>) -> () {
+    pub fn set_move(&self, angle: Option<f64>) {
         match angle {
             None => {
                 self.movement.store(false, Ordering::SeqCst);
@@ -52,16 +53,18 @@ impl NodeState {
         }
     }
     
-    pub fn set_attack(&self, attack: bool) -> () {
+    pub fn set_attack(&self, attack: bool) {
         self.attack.store(attack, Ordering::SeqCst);
     }
 }
 
 
 pub struct Node<'a, const POOL_SIZE: usize> {
-    node:   Arc<InnerNode<'a, POOL_SIZE>>,
+    node:   Arc<InnerNode<POOL_SIZE>>,
     states: Arc<NodeState>,
     config: Arc<NodeConfig<'a>>,
+    ticker_rx: tokio::sync::mpsc::Receiver<Action>,
+    ticker_tx: tokio::sync::mpsc::Sender<Action>,
 }
 
 
@@ -69,114 +72,163 @@ impl<'a, const POOL_SIZE: usize> Node<'a, POOL_SIZE> {
     pub fn new(config: NodeConfig<'a>, server_addr: SocketAddrV4) -> Self {
         let iden = config.iden();
         let ev_device = config.ev_device();
+        let (ticker_tx, ticker_rx) = tokio::sync::mpsc::channel(1);
         Node {
             node: Arc::new(InnerNode::new(DeviceConnPool::new(iden.to_string(), server_addr), ev_device)),
             states: Arc::new(NodeState::new()),
             config: Arc::new(config),
+            ticker_rx, ticker_tx,
         }
     }
     
     async fn get_fb(&self) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, Error> {
-        Ok(self.node.read_frame_buf().await?)
+        self.node.read_frame_buf().await
+    }
+    
+    pub async fn schedule(&self) -> Result<(), Error> {
+        loop {
+            todo!()
+        }
     }
 }
 
-impl<'a, const POOL_SIZE: usize> Node<'a, POOL_SIZE> {
-    // async fn act(&'a self, action: Action) -> Result<(), Error> {
-    //     let joystick_task = self.joystick(action.direction());
-    //     let attack_task = self.attack(action.attack());
-    //     let skill_down_task = self.skill(true);
-    //     let weapon_down_task = self.weapon(true);
-    //     
-    //     let skill_task: tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-    //         if !action.skill() {
-    //             return Ok(())
-    //         }
-    //         skill_down_task.await?;
-    //         weapon_down_task.await?;
-    //         
-    //         Ok(())
-    //     });
-    //     
-    //     Ok(())
-    // }
+type NodeResultHandle<T> = Result<JoinHandle<Result<T, Error>>, Error>;
+
+impl<const POOL_SIZE: usize> Node<'_, POOL_SIZE> {
+    fn tick(&self, action: Action) -> Result<(), Error> {
+        todo!()
+    }
     
-    // time independent action
-    // async fn joystick(
-    //     node: Arc<InnerNode<'a, POOL_SIZE>>,
-    //     config: Arc<NodeConfig<'a>>,
-    //     direction: Option<f64>
-    // ) -> Result<(), Error> {
-    //     match direction {
-    //         Some(direction) => {
-    //             let center
-    //                 = config.keymap_get("joystick")
-    //                 .unwrap_or(Position::default());
-    //             let distance = 200f64;
-    //             let target = Position::new(
-    //                 center.x + (distance / direction.cos()) as u32,
-    //                 center.y + (distance / direction.sin()) as u32,
-    //             );
-    //             node.touch_down("joystick", target).await?
-    //         },
-    //         None => {
-    //             node.touch_up("joystick").await?
-    //         }
-    //     };
-    //     Ok(())
-    // }
-    // 
-    // async fn attack(&self, attack: bool) -> Result<bool, Error> {
-    //     let states = self.states.clone();
-    //     let config = self.config.clone();
-    //     let pos = config.keymap_get("attack")
-    //         .ok_or(Error::Custom("attack keymap not found".to_string()))?;
-    //     let node = self.node.clone();
-    //     
-    //     tokio::spawn(async move {
-    //         if !(states.is_attacking() ^ attack) {
-    //             return Ok(false)
-    //         }
-    //         match attack {
-    //             true => {
-    //                 node.touch_down("attack", *pos).await?;
-    //             },
-    //             false => {
-    //                 node.touch_up("attack").await?;
-    //             }
-    //         }
-    //         states.set_attack(attack);
-    //         Ok(true)
-    //     }).await?
-    // }
-    // 
-    // async fn skill(&self, skill: bool) -> Result<(), Error> {
-    //     let pos = self.config.keymap_get("skill")
-    //         .ok_or(Error::Custom("skill keymap not found".to_string()))?;
-    //     match skill {
-    //         true => {
-    //             self.node.touch_down("skill", pos).await?;
-    //         },
-    //         false => {
-    //             self.node.touch_up("skill").await?;
-    //         }
-    //     }
-    //     Ok(())
-    // }
-    // 
-    // async fn weapon(&self, weapon: bool) -> Result<(), Error> {
-    //     let pos = self.config.keymap_get("weapon")
-    //         .ok_or(Error::Custom("weapon keymap not found".to_string()))?;
-    //     match weapon {
-    //         true => {
-    //             self.node.touch_down("weapon", pos).await?;
-    //         },
-    //         false => {
-    //             self.node.touch_up("weapon").await?;
-    //         }
-    //     }
-    //     Ok(())
-    // }
+    async fn act(&self, action: Action) -> Result<(), Error> {
+        let mut tasks = Vec::with_capacity(8);
+        // movement
+        tasks.push(self.joystick(action.direction())?);
+        // attack
+        tasks.push(self.attack(action.attack())?);
+        // skill
+        if action.skill() {
+            tasks.push(self.click("skill")?);
+        }
+        if action.weapon() {
+            tasks.push(self.click("weapon")?);
+       }
+        
+        for task in tasks {
+            let _ = task.await?;
+        }
+        
+        Ok(())
+        
+    }
+    
+    fn click(&self, key: &str) -> NodeResultHandle<()> {
+        let key = key.to_string();
+        let node = self.node.clone();
+        let pos = self.config.keymap_get(&key)
+            .ok_or(Error::Custom(format!("keymap {key} not found")))?;
+        
+        let handle = tokio::spawn(async move {
+            node.touch_down(&key, pos).await?;
+            node.touch_up(&key).await?;
+            Ok(())
+        });
+        
+       Ok(handle)
+    }
+    
+    
+    fn joystick(&self, direction: Option<f64>) -> NodeResultHandle<()> {
+        let node = self.node.clone();
+        
+        let handle = match direction {
+            Some(direction) => {
+                let center
+                    = self.config.keymap_get("joystick")
+                    .unwrap_or(Position::default());
+                let distance = 200f64;
+                let target = Position::new(
+                    center.x + (distance / direction.cos()) as u32,
+                    center.y + (distance / direction.sin()) as u32,
+                );
+                tokio::spawn(async move {
+                    node.touch_down("joystick", target).await?;
+                    Ok(())
+                })
+            },
+            None => {
+                tokio::spawn(async move {
+                    node.touch_up("joystick").await?;
+                    Ok(())
+                })
+            }
+        };
+        
+        Ok(handle)
+    }
+    
+    fn attack(&self, attack: bool) -> NodeResultHandle<()> {
+        let states = self.states.clone();
+        let node = self.node.clone();
+        let pos = self.config.keymap_get("attack")
+            .ok_or(Error::Custom("attack keymap not found".to_string()))?;
+        
+        let handle = tokio::spawn(async move {
+            if !(states.is_attacking() ^ attack) {
+                return Ok(())
+            }
+            match attack {
+                true => {
+                    node.touch_down("attack", pos).await?;
+                },
+                false => {
+                    node.touch_up("attack").await?;
+                }
+            }
+
+            states.set_attack(attack);
+            Ok(())
+        });
+        
+        Ok(handle)
+    }
+
+    fn skill(&self, skill: bool) -> NodeResultHandle<()> {
+        let node = self.node.clone();
+        let pos = self.config.keymap_get("skill")
+            .ok_or(Error::Custom("skill keymap not found".to_string()))?;
+        
+        let handle = tokio::spawn(async move {
+            match skill {
+                true => {
+                    node.touch_down("skill", pos).await?;
+                },
+                false => {
+                    node.touch_up("skill").await?;
+                }
+            }
+            Ok(())
+        });
+        Ok(handle)
+    }
+    
+    fn weapon(&self, weapon: bool) -> NodeResultHandle<()> {
+        let node = self.node.clone();
+        let pos = self.config.keymap_get("weapon")
+            .ok_or(Error::Custom("weapon keymap not found".to_string()))?;
+
+        let handle = tokio::spawn(async move {
+            match weapon {
+                true => {
+                    node.touch_down("weapon", pos).await?;
+                },
+                false => {
+                    node.touch_up("weapon").await?;
+                }
+            }
+            Ok(())
+        });
+        Ok(handle)
+    }
 }
 
 // #[tokio::test]

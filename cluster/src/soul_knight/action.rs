@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     direction: Option<f64>,
     attack: bool,

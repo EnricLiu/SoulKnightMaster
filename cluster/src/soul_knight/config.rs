@@ -34,12 +34,15 @@ pub struct NodeConfigKeyMap {
 }
 
 impl NodeConfigKeyMap {
-    pub fn get(&self, key: &str) -> Option<Arc<Position<u32>>> {
+    pub fn keys() -> Vec<&'static str> {
+        vec!["joystick", "attack", "skill", "weapon"]
+    }
+    pub fn get(&self, key: &str) -> Option<Position<u32>> {
         match key {
-            "joystick"  => Some(Arc::new(self.joystick)),
-            "attack"    => Some(Arc::new(self.attack)),
-            "skill"     => Some(Arc::new(self.skill)),
-            "weapon"    => Some(Arc::new(self.weapon)),
+            "joystick"  => Some(self.joystick),
+            "attack"    => Some(self.attack),
+            "skill"     => Some(self.skill),
+            "weapon"    => Some(self.weapon),
             _ => None
         }
     }
@@ -93,7 +96,7 @@ impl<'a> NodeConfig<'a> {
         self.ev_device
     }
     
-    pub fn keymap_get(&self, key: &str) -> Option<Arc<Position<u32>>> {
+    pub fn keymap_get(&self, key: &str) -> Option<Position<u32>> {
         self.keymap.get(key)
     }
 }
