@@ -10,20 +10,22 @@ use crate::utils::log;
 
 pub struct DeviceConnPool<const MAX_POOL_SIZE: usize> {
     conns: Mutex<VecDeque<Arc<ADBServerDevice>>>,
-    device_iden: String,
+    device_iden: &'static str,
     server_addr: SocketAddrV4,
+    
+    // health: PoolHealth,
 }
 
 impl<const MAX_POOL_SIZE: usize> Default for DeviceConnPool<MAX_POOL_SIZE> {
     fn default() -> Self {
-        let device_iden = "127.0.0.1:16384".to_string();
+        let device_iden = "127.0.0.1:16384";
         let server_addr = SocketAddrV4::from_str("127.0.0.1:5037").unwrap();
         DeviceConnPool::new(device_iden, server_addr)
     }
 }
 
 impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
-    pub fn new(device_iden: String, server_addr: SocketAddrV4) -> Self {
+    pub fn new(device_iden: &'static str, server_addr: SocketAddrV4) -> Self {
         DeviceConnPool {
             conns: Mutex::new(VecDeque::with_capacity(MAX_POOL_SIZE)),
             device_iden,
@@ -46,7 +48,7 @@ impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
     
     pub(crate) async fn make_conn(&self) -> Arc<ADBServerDevice> {
         let conns = ADBServerDevice::new(
-            self.device_iden.clone(), Some(self.server_addr));
+            self.device_iden.to_string(), Some(self.server_addr));
         Arc::new(conns)
     }
     
@@ -70,7 +72,7 @@ impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
         let mut conns = self.conns.lock().await;
         if conns.len() < MAX_POOL_SIZE {
             conns.push_back(conn);
-            log("GIVEN BACK!!");
+            // log("GIVEN BACK!!");
         }
     }
     

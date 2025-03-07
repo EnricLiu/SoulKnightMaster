@@ -6,19 +6,19 @@ use crate::utils::Position;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
-    name: String,
+    name: &'static str,
     addr: SocketAddrV4
 }
 
 impl ServerConfig {
-    pub fn new(name: &str, addr: SocketAddrV4) -> Self {
+    pub fn new(name: &'static str, addr: SocketAddrV4) -> Self {
         ServerConfig {
-            name: name.to_string(),
+            name,
             addr
         }
     }
-    pub fn name(&self) -> &str {
-        self.name.as_str()
+    pub fn name(&self) -> &'static str {
+        self.name
     }
     pub fn addr(&self) -> SocketAddrV4 {
         self.addr
@@ -49,19 +49,19 @@ impl NodeConfigKeyMap {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NodeConfig<'a> {
-    name: String, 
-    iden: SocketAddrV4,
-    server:     &'a str,
-    ev_device:  &'a str,
+pub struct NodeConfig {
+    name: &'static str, 
+    iden: &'static str,
+    server:     &'static str,
+    ev_device:  &'static str,
     resolution: Position<u32>,
     keymap:     NodeConfigKeyMap,
 }
 
-impl<'a> Default for NodeConfig<'a> {
+impl Default for NodeConfig {
     fn default() -> Self {
         NodeConfig {
-            name:   "default".to_string(),
+            name:   "default",
             server: "default",
             keymap: NodeConfigKeyMap {
                 joystick:   Position::new(100, 100),
@@ -70,17 +70,17 @@ impl<'a> Default for NodeConfig<'a> {
                 weapon:     Position::new(400, 400),
             },
             ev_device:  "/dev/input/event4",
-            iden:       SocketAddrV4::new("127.0.0.1".parse().unwrap(), 16384),
+            iden:       "127.0.0.1:16384",
             resolution: Position::new(1280, 720),
         }
     }
 }
-impl<'a> NodeConfig<'a> {
-    pub fn name(&self) -> &str {
-        self.name.as_str()
+impl NodeConfig {
+    pub fn name(&self) -> &'static str {
+        self.name
     }
     
-    pub fn iden(&self) -> SocketAddrV4 {
+    pub fn iden(&self) -> &'static str {
         self.iden
     }
     
@@ -88,16 +88,16 @@ impl<'a> NodeConfig<'a> {
         self.resolution
     }
     
-    pub fn server(&self) -> &'a str {
+    pub fn server(&self) -> &'static str {
         self.server
     }
     
-    pub fn ev_device(&self) -> &'a str {
+    pub fn ev_device(&self) -> &'static str {
         self.ev_device
     }
     
-    pub fn keymap_get(&self, key: &str) -> Option<Position<u32>> {
-        self.keymap.get(key)
+    pub fn keymap_get(&self, key: &str) -> Position<u32> {
+        self.keymap.get(key).expect(&format!("KeyMap: Key[{key}] not found, Please check config."))
     }
 }
 

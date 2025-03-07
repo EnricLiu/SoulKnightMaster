@@ -1,10 +1,10 @@
 use std::net::SocketAddrV4;
 use adb_client::{ADBServer, DeviceShort};
-use super::config::ServerConfig;
-use super::error::{Error, ServerError};
+use super::ServerConfig;
+use super::{Error, ServerError};
 
 pub struct Server {
-    name: String,
+    name: &'static str,
     addr: SocketAddrV4,
     server: ADBServer,
 }
@@ -12,7 +12,7 @@ pub struct Server {
 impl From<ServerConfig> for Server {
     fn from(config: ServerConfig) -> Self {
         Server {
-            name: config.name().to_string(),
+            name: config.name(),
             addr: config.addr(),
             server: ADBServer::new(config.addr()),
         }
@@ -20,23 +20,23 @@ impl From<ServerConfig> for Server {
 }
 
 impl Server {
-    pub fn new(name: &str, addr: SocketAddrV4) -> Self {
+    pub fn new(name: &'static str, addr: SocketAddrV4) -> Self {
         Server {
             addr,
-            name: name.to_string(),
+            name,
             server: ADBServer::new(addr),
         }
     }
     
-    pub fn check_node_by_iden(&mut self, iden: &SocketAddrV4) -> Result<(), ServerError> {
+    pub fn check_node_by_iden(&mut self, iden: &str) -> Result<(), ServerError> {
         let nb_devices = self.server
             .devices()?
             .into_iter()
-            .filter(|d| d.identifier.as_str() == &iden.to_string())
+            .filter(|d| d.identifier.as_str() == iden)
             .collect::<Vec<DeviceShort>>()
             .len();
         if nb_devices == 0 {
-            return Err(ServerError::DeviceNotConnected(*iden));
+            return Err(ServerError::DeviceNotConnected(iden.to_string()));
         }
         Ok(())
     }
