@@ -3,6 +3,7 @@ pub mod pool;
 pub mod error;
 pub mod action;
 mod test;
+mod health;
 
 use std::io::Write;
 use std::sync::{Arc, LazyLock};
@@ -21,6 +22,7 @@ use action::{NodeAction, ActionFactory};
 
 use crate::utils::{get_id, log, Position, START};
 
+#[derive(Debug)]
 pub enum ShellCommand<'a> {
     Action(NodeAction<'a>),
     Raw(String)
@@ -61,6 +63,7 @@ pub struct Node<const POOL_SIZE: usize> {
     pool:   Arc<Mutex<DeviceConnPool<POOL_SIZE>>>,
 
     action_man: ActionFactory,
+    // health:     NodeHealth
 }
 
 impl<const POOL_SIZE: usize> Default for Node<POOL_SIZE> {
@@ -133,11 +136,13 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
         let mut conn = self.get_conn().await?;
 
         let task_id = get_id();
-        log(&format!("[{task_id}] Spawn!!  [{}]", Local::now().timestamp_micros() - *START));
+        
+        let start = Local::now();
+        log(&format!("[{task_id}] Reading FB!"));
 
         let task = spawn_blocking(move || {
             let res = conn.framebuffer_inner();
-            log(&format!("[{task_id}] Joined!! [{}]", Local::now().timestamp_micros() - *START));
+            log(&format!("[{task_id}] FB Read! <-{}ms->", (Local::now() - start).num_milliseconds()));
             (res, conn)
         });
 
@@ -178,7 +183,6 @@ impl<'a, const POOL_SIZE: usize> Node<POOL_SIZE> {
     pub(crate) async fn send_action(&self, action: &ShellCommand<'_>) -> Result<(), Error> {
         let mut conn = self.get_conn().await?;
         let command = action.to_string();
-        log(&command);
         let task = spawn_blocking(move || {
             let res = conn.shell_command(
                 &[command.as_ref()],
@@ -194,33 +198,41 @@ impl<'a, const POOL_SIZE: usize> Node<POOL_SIZE> {
     pub async fn key_down(&self, key: Key) -> Result<(), Error> {
         let action = self.action_man.get_key_down_action(key).await;
         let command = action.into();
+        log(&format!("KeyDown {:?}", &command));
         self.send_action(&command).await?;
         Ok(())
     }
     pub async fn key_up(&self, key: Key) -> Result<(), Error> {
         let action = self.action_man.get_key_up_action(key).await;
         let command = action.into();
+        log(&format!("KeyUp {:?}", &command));
         self.send_action(&command).await?;
         Ok(())
     }
 
     pub async fn touch_down(&self, iden: &'a str, pos: Position<u32>) -> Result<(), Error> {
         let action = self.action_man.get_touch_down_action(iden, pos).await;
-        let command = action.into();
+        if action.is_none() { return Ok(()) };
+        let command = action.unwrap().into();
+        log(&format!("TouchDown['{iden}'] {:?}", &command));
         self.send_action(&command).await?;
         Ok(())
     }
 
     pub async fn touch_move(&self, iden: &'a str, pos: Position<u32>) -> Result<(), Error> {
         let action = self.action_man.get_touch_move_action(iden, pos).await;
-        let command = action.into();
+        if action.is_none() { return Ok(()) };
+        let command = action.unwrap().into();
+        log(&format!("TouchMove['{iden}'] {:?}", &command));
         self.send_action(&command).await?;
         Ok(())
     }
 
     pub async fn touch_up(&self, iden: &'a str) -> Result<(), Error> {
         let action = self.action_man.get_touch_up_action(iden).await;
-        let command = action.into();
+        if action.is_none() { return Ok(()) };
+        let command = action.unwrap().into();
+        log(&format!("TouchUp['{iden}'] {:?}", &command));
         self.send_action(&command).await?;
         Ok(())
     }
