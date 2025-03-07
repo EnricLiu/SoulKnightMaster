@@ -1,10 +1,13 @@
+use std::collections::hash_map;
 use std::fmt;
 use std::sync::Arc;
 use dashmap::DashMap;
+use log::debug;
 use tokio::sync::{RwLock};
 use crate::node::event::{Key, KeyValue, NodeEvent};
 use crate::utils::Position;
 
+#[derive(Debug)]
 pub struct NodeAction<'a> {
     pub ev_device: &'a str,
     payload: Vec<NodeEvent>,
@@ -75,7 +78,7 @@ impl ActionFactory {
         NodeAction::new(vec![NodeEvent::Key(key, KeyValue::Up)], &self.ev_device)
     }
 
-    pub(crate) async fn get_touch_down_action(&self, iden: &str, pos: Position<u32>) -> NodeAction {
+    pub(crate) async fn get_touch_down_action(&self, iden: &str, pos: Position<u32>) -> Option<NodeAction> {
         let mut is_move = false;
         let mut slot_id = 1;
         for item in self.status.touch.iter() {
@@ -85,7 +88,19 @@ impl ActionFactory {
             }
         }
         if is_move { return self.get_touch_move_action(iden, pos).await }
-        
+
+        self.status.touch.insert(iden.to_string(), (slot_id, pos));
+        let mut last_touch = self.status.last_touch.write().await;
+        *last_touch = iden.to_string();
+        drop(last_touch);
+
+        // let entry = self.status.touch.entry(iden.to_string());
+        // if let dashmap::Entry::Occupied(_) = entry {
+        //     return self.get_touch_move_action(iden, pos).await;
+        // }
+        // let slot_id = ...;
+        // entry.or_insert((slot_id, pos));
+
         let ret = vec![
             NodeEvent::AbsMtSlot { slot_id },
             NodeEvent::AbsMtTrackingId { slot_id },
@@ -93,23 +108,24 @@ impl ActionFactory {
             NodeEvent::AbsMtPositionX(pos.x),
             NodeEvent::AbsMtPositionY(pos.y),
         ];
-        
-        let mut last_touch = self.status.last_touch.write().await;
-        *last_touch = iden.to_string();
-        drop(last_touch);
-        self.status.touch.insert(iden.to_string(), (slot_id, pos));
-        NodeAction::new(ret, &self.ev_device)
+
+        Some(NodeAction::new(ret, &self.ev_device))
     }
 
-    pub(crate) async fn get_touch_move_action(&self, iden: &str, pos: Position<u32>) -> NodeAction {
-        if !self.status.touch.contains_key(iden) {
-            panic!("touch not found");
-        }
-        let slot_id = self.status.touch.get(iden).unwrap().0;
+    pub(crate) async fn get_touch_move_action(&self, iden: &str, pos: Position<u32>) -> Option<NodeAction> {
+        let mut slot_id: Option<u32> = None;
+        
+        self.status.touch.entry(iden.to_string())
+            .and_modify(|v| {
+                let (inner_id, inner_pos) = v;
+                slot_id = Some(*inner_id);
+                *inner_pos = pos;
+            });
+        let slot_id = slot_id.expect("touch not found");
+        let mut last_touch = self.status.last_touch.write().await;
 
         let mut ret = Vec::with_capacity(4);
         ret.push(NodeEvent::BtnTouch(KeyValue::Down));
-        let mut last_touch = self.status.last_touch.write().await;
         if *last_touch != iden {
             ret.push(NodeEvent::AbsMtSlot { slot_id });
             *last_touch = iden.to_string();
@@ -118,28 +134,26 @@ impl ActionFactory {
         ret.push(NodeEvent::AbsMtPositionX(pos.x));
         ret.push(NodeEvent::AbsMtPositionY(pos.y));
 
-        self.status.touch.insert(iden.to_string(), (slot_id, pos));
-        NodeAction::new(ret, &self.ev_device)
+        Some(NodeAction::new(ret, &self.ev_device))
     }
 
-    pub(crate) async fn get_touch_up_action(&self, iden: &str) -> NodeAction {
-        if !self.status.touch.contains_key(iden) {
-            panic!("touch not found");
+    pub(crate) async fn get_touch_up_action(&self, iden: &str) -> Option<NodeAction> {
+        if let Some((_, (slot_id, _))) = self.status.touch.remove(iden) {
+            let mut last_touch = self.status.last_touch.write().await;
+            let mut ret = Vec::with_capacity(3);
+            if *last_touch != iden {
+                ret.push(NodeEvent::AbsMtSlot { slot_id });
+            }
+            *last_touch = String::new();
+            drop(last_touch);
+            ret.push(NodeEvent::AbsMtTrackingId { slot_id: Self::TOUCH_UP_TRACK_ID });
+            ret.push(NodeEvent::BtnTouch(KeyValue::Up));
+            
+            return Some(NodeAction::new(ret, &self.ev_device))
         }
 
-        let mut ret = Vec::with_capacity(3);
-        let mut last_touch = self.status.last_touch.write().await;
-        if *last_touch != iden {
-            let slot_id = self.status.touch.get(iden).unwrap().0;
-            ret.push(NodeEvent::AbsMtSlot { slot_id });
-        }
-        *last_touch = String::new();
-        drop(last_touch);
-        ret.push(NodeEvent::AbsMtTrackingId { slot_id: Self::TOUCH_UP_TRACK_ID });
-        ret.push(NodeEvent::BtnTouch(KeyValue::Up));
-        
-        self.status.touch.remove(iden);
-        NodeAction::new(ret, &self.ev_device)
+        debug!("touch['{iden}'] not found");
+        None
     }
 }
 
@@ -147,6 +161,6 @@ impl ActionFactory {
 async fn action() -> Result<(), Box<dyn std::error::Error>> {
     let action = ActionFactory::new("/dev/input/event4");
     let action = action.get_touch_down_action("joystick", Position::new(100, 100)).await;
-    println!("{:?}", action.cmd());
+    println!("{:?}", action.unwrap().cmd());
     Ok(())
 } 
