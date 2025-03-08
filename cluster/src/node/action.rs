@@ -51,6 +51,7 @@ pub struct ActionFactory {
 }
 
 impl ActionFactory {
+    const SCREEN_SIZE: (u32, u32) = (1280, 720);
     const TOUCH_UP_TRACK_ID: u32 = 0xc352;
     
     pub fn new(ev_device: &str) -> Self {
@@ -105,8 +106,8 @@ impl ActionFactory {
             NodeEvent::AbsMtSlot { slot_id },
             NodeEvent::AbsMtTrackingId { slot_id },
             NodeEvent::BtnTouch(KeyValue::Down),
-            NodeEvent::AbsMtPositionX(pos.x),
-            NodeEvent::AbsMtPositionY(pos.y),
+            NodeEvent::AbsMtPositionX(Self::SCREEN_SIZE.1 - pos.y),
+            NodeEvent::AbsMtPositionY(pos.x),
         ];
 
         Some(NodeAction::new(ret, &self.ev_device))
@@ -131,8 +132,8 @@ impl ActionFactory {
             *last_touch = iden.to_string();
         }
         drop(last_touch);
-        ret.push(NodeEvent::AbsMtPositionX(pos.x));
-        ret.push(NodeEvent::AbsMtPositionY(pos.y));
+        ret.push(NodeEvent::AbsMtPositionX(Self::SCREEN_SIZE.1 - pos.y));
+        ret.push(NodeEvent::AbsMtPositionY(pos.x));
 
         Some(NodeAction::new(ret, &self.ev_device))
     }

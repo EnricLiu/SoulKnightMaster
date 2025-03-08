@@ -16,4 +16,5 @@ thiserror = "2.0.11"
 
 adb_client = { version = "2.1.7" }
 image = "0.25.5"
+log = "0.4.26"
 
