@@ -105,21 +105,21 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
         self.node.connect().await?;
 
         let handle = tokio::spawn(async move {
-            // no need, drop frame
-            // let fb_res = AtomicBool::new(true);
-            
-            let joystick_res = AtomicBool::new(true);
-            let attack_res = AtomicBool::new(true);
-            
-            let skill_res = AtomicBool::new(true);
-            let weapon_res = AtomicBool::new(true);
+            let node_name = config.name();
+            let send_if_err =
+                |res: Result<(), NodeError>,
+                 watcher: &watch::Sender<NodeWatcherSignal>| {
+                    if res.is_ok() { return }
+                    let err = res.unwrap_err().to_string();
+                    watcher
+                        .send(NodeWatcherSignal::Error { node_name, err })
+                        .expect("[Fatal] Watcher Sender Failed to send.");
+                };
 
             let mut ticker_rx = ticker_rx.write().await;
             while let Some(action) = ticker_rx.recv().await {
                 match action {
                     NodeTickerSignal::Tick(action) => {
-                        let node_name = config.name();
-
                         // FrameBufferTask
                         let fb_sn = action.sn();
                         let _fb = fb.clone();
@@ -149,17 +149,32 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                                     .expect("[Fatal] Watcher Sender Failed to send.");
                             };
                         });
-
-                        // JoystickTask
+                        
                         let _node = node.clone();
+                        let _config = config.clone();
                         let _watcher_tx = watcher_tx.clone();
-                        let touch_pos = config.keymap_get("joystick");
-                        let direction = action.direction();
-                        let joystick_task = tokio::spawn(async move {
+                        let _states = states.clone();
+                        let event_task = tokio::spawn(async move {
+                            // ------------- skill_down ------------
+                            if action.skill() {
+                                let res = _node
+                                    .touch_down("skill", _config.keymap_get("skill")).await
+                                    .map_err(|e| NodeError::NodeErr(e));
+                                send_if_err(res, &_watcher_tx);
+                            }
+                            // ------------ action_down ------------
+                            if action.weapon() {
+                                let res = _node
+                                    .touch_down("weapon", _config.keymap_get("weapon")).await
+                                    .map_err(|e| NodeError::NodeErr(e));
+                                send_if_err(res, &_watcher_tx);
+                            }
+                            // ------------ joystick ------------ 
                             let res = {
-                                match direction {
+                                match action.direction() {
                                     Some(direction) => {
                                         let distance = 128f64;
+                                        let touch_pos = _config.keymap_get("joystick");
                                         let target = Position::new(
                                             touch_pos.x + (distance * direction.cos()) as u32,
                                             touch_pos.y + (distance * direction.sin()) as u32,
@@ -171,61 +186,41 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                                     }
                                 }.map_err(|e| NodeError::NodeErr(e))
                             };
+                            send_if_err(res, &_watcher_tx);
 
-                            if let Err(err) = res {
-                                let err = err.to_string();
-                                _watcher_tx
-                                    .send(NodeWatcherSignal::Error { node_name, err })
-                                    .expect("[Fatal] Watcher Sender Failed to send.");
-                            };
+                            // ------------- attack ------------- 
+                            let is_attack = action.attack();
+                            if !(is_attack ^ _states.is_attacking()) {
+                                let touch_pos = _config.keymap_get("attack");
 
-                        });
-
-                        // AttackTask
-
-                        let _states = states.clone();
-                        let attack = action.attack();
-                        if !(attack ^ _states.is_attacking()) {
-                            let _node = node.clone();
-                            let _watcher_tx = watcher_tx.clone();
-                            let touch_pos = config.keymap_get("attack");
-
-                            let attack_task = tokio::spawn(async move {
                                 let res: Result<(), NodeError> = {
-                                    match attack {
-                                        true  => _node.touch_down("attack", touch_pos).await,
+                                    match is_attack {
+                                        true => _node.touch_down("attack", touch_pos).await,
                                         false => _node.touch_up("attack").await,
                                     }.map_err(|e| NodeError::NodeErr(e))
                                 };
-                                
-                                _states.set_attack(attack);
 
-                                if let Err(err) = res {
-                                    let err = err.to_string();
-                                    _watcher_tx
-                                        .send(NodeWatcherSignal::Error {  node_name, err })
-                                        .expect("[Fatal] Watcher Sender Failed to send.");
-                                };
-                            });
-                        }
+                                _states.set_attack(is_attack);
+                                send_if_err(res, &_watcher_tx);
 
-                        // SkillTask
-                        if action.skill() {
-                            let _node = node.clone();
-                            let key = "skill";
-                            let pos = config.keymap_get(key);
-                            let skill_task
-                                = Self::click(_node, config.name(), watcher_tx.clone(), pos, key);
-                        }
+                            }
 
-                        // WeaponTask
-                        if action.weapon() {
-                            let _node = node.clone();
-                            let key = "weapon";
-                            let pos = config.keymap_get(key);
-                            let weapon_task
-                                = Self::click(_node, config.name(), watcher_tx.clone(), pos, key);
-                        }
+                            // ------------- skill_up -------------
+                            if action.skill() {
+                                let res = _node
+                                    .touch_up("skill").await
+                                    .map_err(|e| NodeError::NodeErr(e));
+                                send_if_err(res, &_watcher_tx);
+                            }
+                            // ------------ action_up -------------
+                            if action.weapon() {
+                                let res = _node
+                                    .touch_up("weapon").await
+                                    .map_err(|e| NodeError::NodeErr(e));
+                                send_if_err(res, &_watcher_tx);
+                            }
+                            
+                        });
                     },
                     _ => {
                         todo!();
@@ -251,49 +246,6 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
     
     pub fn watch(&self) -> watch::Receiver<NodeWatcherSignal> {
         self.watcher_rx.clone()
-    }
-    
-    fn click(node: Arc<InnerNode<POOL_SIZE>>, node_name: &'static str,
-             watcher: watch::Sender<NodeWatcherSignal>,
-             pos: Position<u32>, key: &'static str) -> JoinHandle<Result<(), NodeError>> {
-        tokio::spawn(async move {
-            // let start = chrono::Local::now();
-            let res: Result<(), NodeError> = {
-                node.touch_down(key, pos).await?;
-                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-                node.touch_up(key).await?;
-                Ok(())
-            };
-
-            if let Err(err) = res {
-                let err = err.to_string();
-                watcher
-                    .send(NodeWatcherSignal::Error { node_name, err })
-                    .expect("[Fatal] Watcher Sender Failed to send.");
-            }
-            Ok(())
-        })
-    }
-    
-    fn trigger(node: Arc<InnerNode<POOL_SIZE>>, node_name: &'static str,
-               watcher: watch::Sender<NodeWatcherSignal>,
-               pos: Position<u32>, key: &'static str) -> JoinHandle<Result<(), NodeError>> {
-        tokio::spawn(async move {
-            // let start = chrono::Local::now();
-            let res: Result<(), NodeError> = {
-                node.touch_down(key, pos).await?;
-                node.touch_up(key).await?;
-                Ok(())
-            };
-
-            if let Err(err) = res {
-                let err = err.to_string();
-                watcher
-                    .send(NodeWatcherSignal::Error { node_name, err })
-                    .expect("[Fatal] Watcher Sender Failed to send.");
-            }
-            Ok(())
-        })
     }
 }
 

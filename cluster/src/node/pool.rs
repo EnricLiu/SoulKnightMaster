@@ -62,7 +62,6 @@ impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
             if let Some(device) = self.try_get().await.ok() {
                 return Ok(device);
             };
-            println!("Waiting");
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         Ok(self.make_conn().await)
@@ -72,7 +71,7 @@ impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
         let mut conns = self.conns.lock().await;
         if conns.len() < MAX_POOL_SIZE {
             conns.push_back(conn);
-            // log("GIVEN BACK!!");
+            log("GIVEN BACK!!");
         }
     }
     
