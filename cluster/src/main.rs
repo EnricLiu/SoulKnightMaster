@@ -53,7 +53,7 @@ async fn main() -> Result<(), soul_knight::NodeError> {
 
     use serde_json;
     let configs: Vec<NodeConfig> = serde_json::from_str(include_str!("../configs/node.json")).unwrap();
-    let config = configs.get(1).unwrap();
+    let config = configs.get(0).unwrap();
 
     let node: Node<16> = Node::new(config.clone(), "127.0.0.1:5037".parse().unwrap());
     let mut watcher: watch::Receiver<NodeWatcherSignal> = node.watch();
@@ -72,17 +72,18 @@ async fn main() -> Result<(), soul_knight::NodeError> {
     let _handle = node.schedule().await?;
     let pi = std::f64::consts::PI;
     let mut start = Local::now();
-    for i in 0..100 {
-        // let action = Action::new(i, Some(0.785), true, true, true);
-        let action = Action::new(i, Some(i as f64 * pi / 4f64), false, false, false);
+    for i in 0..10 {
+        let action = Action::new(i, Some(i as f64 * pi / 4f64), true, true, true);
         interval.tick().await;
-        node.tick(NodeTickerSignal::Tick(action)).await.expect("我超");
+        // let action = Action::new(i, Some(i as f64 * pi / 4f64), false, false, false);
+        node.tick(NodeTickerSignal::Tick(action)).await.expect("???");
         let now = Local::now();
         println!("------------->tick<------------ [{}ms]", (now - start).num_milliseconds());
         start = now;
     };
     
-    interval.tick().await;
+    node.release().await;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     Ok(())
 }
 

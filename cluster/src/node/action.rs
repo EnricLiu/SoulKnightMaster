@@ -1,5 +1,6 @@
 use std::collections::hash_map;
 use std::fmt;
+use std::ops::Add;
 use std::sync::Arc;
 use dashmap::DashMap;
 use log::debug;
@@ -27,7 +28,7 @@ impl<'a> NodeAction<'a> {
         }
         let ret = ret.iter()
             .map(|ev| format!("sendevent {} {}", self.ev_device, ev));
-        ret.collect::<Vec<String>>().join(" && ")
+        ret.collect::<Vec<String>>().join(" && ").add("\r\n")
     }
 }
 
@@ -81,7 +82,7 @@ impl ActionFactory {
 
     pub(crate) async fn get_touch_down_action(&self, iden: &str, pos: Position<u32>) -> Option<NodeAction> {
         let mut is_move = false;
-        let mut slot_id = 1;
+        let mut slot_id = 2;
         for item in self.status.touch.iter() {
             if *item.key() == iden { is_move = true; break }
             if item.value().0 == slot_id {
@@ -106,8 +107,8 @@ impl ActionFactory {
             NodeEvent::AbsMtSlot { slot_id },
             NodeEvent::AbsMtTrackingId { slot_id },
             NodeEvent::BtnTouch(KeyValue::Down),
-            NodeEvent::AbsMtPositionX(Self::SCREEN_SIZE.1 - pos.y),
-            NodeEvent::AbsMtPositionY(pos.x),
+            NodeEvent::AbsMtPositionX(pos.x),
+            NodeEvent::AbsMtPositionY(pos.y),
         ];
 
         Some(NodeAction::new(ret, &self.ev_device))
@@ -132,8 +133,8 @@ impl ActionFactory {
             *last_touch = iden.to_string();
         }
         drop(last_touch);
-        ret.push(NodeEvent::AbsMtPositionX(Self::SCREEN_SIZE.1 - pos.y));
-        ret.push(NodeEvent::AbsMtPositionY(pos.x));
+        ret.push(NodeEvent::AbsMtPositionX(pos.x));
+        ret.push(NodeEvent::AbsMtPositionY(pos.y));
 
         Some(NodeAction::new(ret, &self.ev_device))
     }

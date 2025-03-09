@@ -29,6 +29,8 @@ pub enum NodeError {
     NodeErr(#[from] NodeErr),
     #[error("Node[{node_name}] Already Scheduled")]
     NodeAlreadyScheduled{ node_name: &'static str },
+    #[error("Timeout fetching fb from Node[{node_name}], sn: {sn}")]
+    ThreadErrorFbTimeout{ node_name: &'static str, sn: u64 },
     #[error("Failed to forward Tick to Node[{node_name}]: {err}")]
     ThreadErrorSend{ node_name: &'static str, err: SendError<NodeTickerSignal> },
     #[error("{0}")]

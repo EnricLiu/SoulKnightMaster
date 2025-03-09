@@ -19,5 +19,5 @@ pub fn log(s: &str) {
     if !DEBUG {
         return;
     }
-    println!("{s}");
+    println!("[DEBUG] {s}");
 }
