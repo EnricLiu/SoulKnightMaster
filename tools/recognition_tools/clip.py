@@ -2,7 +2,7 @@ import cv2
 import os
 import time
 # 打开视频文件
-video_path = './元气骑士(3).mp4'
+video_path = './办公室.mp4'
 cap = cv2.VideoCapture(video_path)
 
 # 检查视频是否成功打开
