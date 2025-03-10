@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::net::SocketAddrV4;
 use std::str::FromStr;
 use std::sync::Arc;
-use adb_client::{ADBDeviceExt, ADBServerDevice};
+use adb_client::ADBServerDevice;
 use tokio::sync::{Mutex};
 
 use crate::adb::error::Error;
@@ -88,6 +88,7 @@ impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
 
 #[tokio::test]
 async fn test() -> Result<(), Error> {
+    use adb_client::ADBDeviceExt;
     let pool: DeviceConnPool<32> = DeviceConnPool::default();
     let conn = pool.get().await?;
     let mut conn = Arc::into_inner(conn).unwrap();

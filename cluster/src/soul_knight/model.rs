@@ -11,8 +11,8 @@ pub enum NodeWatcherSignal {
 }
 
 #[derive(Debug, Clone)]
-pub enum NodeTickerSignal {
-    Tick(Action),
+pub enum NodeSignal {
+    Action(Action),
     Close,
     Kill
 }
@@ -20,7 +20,6 @@ pub enum NodeTickerSignal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     sn: u64,
-    fb: bool,
     direction: Option<f64>,
     attack: bool,
     skill:  bool,
@@ -28,10 +27,9 @@ pub struct Action {
 }
 
 impl Action {
-    pub fn new(sn: u64, fb: bool, dir: Option<f64>, attack: bool, skill: bool, weapon: bool) -> Self {
+    pub fn new(sn: u64, dir: Option<f64>, attack: bool, skill: bool, weapon: bool) -> Self {
         Action {
             sn,
-            fb,
             skill,
             attack,
             weapon,
@@ -40,9 +38,6 @@ impl Action {
     }
     pub fn sn(&self) -> u64 {
         self.sn
-    }
-    pub fn fb(&self) -> bool {
-        self.fb
     }
     pub fn direction(&self) -> Option<f64> {
         self.direction
@@ -73,7 +68,7 @@ impl FrameBuffer {
             fb,
         }
     }
-    
+
     pub fn unwrap(self) -> (String, u64, Vec<u8>) {
         (self.node, self.sn, self.fb)
     }

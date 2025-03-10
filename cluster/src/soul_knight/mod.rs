@@ -8,4 +8,4 @@ mod model;
 pub use config::{NodeConfig, ServerConfig};
 pub use cluster::Cluster;
 pub use error::{Error, NodeError, ServerError};
-pub use model::{Action, NodeTickerSignal, NodeWatcherSignal, FrameBuffer};
+pub use model::{Action, NodeSignal, NodeWatcherSignal, FrameBuffer};

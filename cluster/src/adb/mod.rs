@@ -6,7 +6,7 @@ mod test;
 mod health;
 
 use std::io::Write;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::Local;
@@ -17,10 +17,10 @@ use adb_client::{ADBDeviceExt, ADBServerDevice};
 
 use error::Error;
 use pool::DeviceConnPool;
-use event::{AdbEvent, KeyValue, Key};
+use event::{KeyValue, Key};
 use action::{InputAction, InputFactory};
 
-use crate::utils::{get_id, log, Position, START};
+use crate::utils::{get_id, log, perf_log, perf_timer, Position, START};
 
 #[derive(Debug)]
 pub enum ShellCommand<'a> {
@@ -137,12 +137,12 @@ impl<const POOL_SIZE: usize> Device<POOL_SIZE> {
 
         let task_id = get_id();
         
-        let start = Local::now();
+        let start = perf_timer();
         log(&format!("[{task_id}] Reading FB!"));
 
         let task = spawn_blocking(move || {
             let res = conn.framebuffer_inner();
-            log(&format!("[{task_id}] FB Read! <-{}ms->", (Local::now() - start).num_milliseconds()));
+            perf_log(&format!("[{task_id}] FB Read!"), start);
             (res, conn)
         });
 
@@ -160,11 +160,11 @@ impl<const POOL_SIZE: usize> Device<POOL_SIZE> {
         let mut conn = self.get_conn().await?;
 
         let task_id = get_id();
-        log(&format!("[{task_id}] Spawn!!  [{}]", Local::now().timestamp_micros() - *START));
+        perf_log(&format!("[{task_id}] Spawn!!"), Some(*START));
 
         let task = spawn_blocking(move || {
             let res = conn.framebuffer_bytes();
-            log(&format!("[{task_id}] Joined!! [{}]", Local::now().timestamp_micros() - *START));
+            perf_log(&format!("[{task_id}] Joined!!"), Some(*START));
             (res, conn)
         });
 
