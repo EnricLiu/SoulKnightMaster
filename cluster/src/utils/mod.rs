@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Local};
 
 pub static COUNTER: AtomicUsize = AtomicUsize::new(0);
-pub static DEBUG: bool = true;
+pub static DEBUG: bool = false;
 
 pub static START: LazyLock<DateTime<Local>> = LazyLock::new(|| {
     Local::now()

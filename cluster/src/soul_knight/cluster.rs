@@ -1,19 +1,31 @@
-use adb_client::ADBServer;
+use std::collections::VecDeque;
+use std::fmt::Debug;
 use dashmap::DashMap;
+use crate::soul_knight::model::NodeSignal;
 use super::server::Server;
 use super::config::{NodeConfig, ServerConfig};
 use super::error::{Error, ServerError};
-use super::node::Node;
+use crate::node::{Node, NodeStatus};
+use crate::soul_knight::{Action, FrameBuffer, NodeError};
 
-pub struct Cluster<'a> {
+pub struct Cluster {
     // name -> Node
-    nodes: DashMap<String, Node<'a, 16>>,
+    nodes: DashMap<String, Node<8>>,
     // name -> ADBServer
     servers: DashMap<String, Server>,
 }
 
-impl<'a> Cluster<'a> {
-    fn new(server_configs: Vec<ServerConfig>) -> Self {
+impl Debug for Cluster {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cluster")
+            .field("adb num", &self.nodes.len())
+            .field("server num", &self.servers.len())
+            .finish()
+    }
+}
+
+impl Cluster {
+    pub fn new(server_configs: Vec<ServerConfig>) -> Self {
         let ret = Cluster {
             nodes: DashMap::new(),
             servers: DashMap::new(),
@@ -28,7 +40,24 @@ impl<'a> Cluster<'a> {
         ret
     }
     
-    fn new_node(&self, config: NodeConfig<'a>) -> Result<String, Error> {
+    pub fn all_devices(&self) -> Vec<NodeStatus> {
+        let mut ret = Vec::with_capacity(self.nodes.len());
+        for node in self.nodes.iter() {
+            ret.push(node.get_status());
+        }
+        ret
+    }
+    
+    pub async fn act_by_name(&self, name: &str, action: Action) -> Result<(), Error> {
+        if let Some(node) = self.nodes.get(name) {
+            node.value().act(NodeSignal::Action(action)).await?;
+            Ok(())
+        } else {
+            Err(Error::NodeNotFound(name.to_string()))
+        }
+    }
+    
+    pub async fn new_node(&self, config: NodeConfig) -> Result<String, Error> {
         let iden = config.iden();
         let server_name = config.server();
         let server_addr
@@ -44,49 +73,73 @@ impl<'a> Cluster<'a> {
             return Err(Error::NodeAlreadyExist(name));
         }
         
-        self.nodes.insert(name.clone(), Node::new(config, server_addr));
+        let node = Node::new(config, server_addr);
+        self.nodes.insert(name.clone(), node);
         
         Ok(name)
     }
     
-    fn drop_node(&self, name: &str) -> Result<(), Error> {
-        if self.nodes.get(name).is_none() {
-            return Err(Error::NodeNotFound(name.to_string()));
-        };
-        self.nodes.remove(name);
-        Ok(())
+    pub async fn schedule_node(&self, name: &str) -> Result<(), Error> {
+        if let Some(node) = self.nodes.get(name) {
+            node.value().schedule().await?;
+            Ok(())
+        } else {
+            Err(Error::NodeNotFound(name.to_string()))
+        }
+    }
+
+    pub async fn deschedule_node(&self, name: &str) -> Result<(), Error> {
+        if let Some(node) = self.nodes.get(name) {
+            node.value().deschedule().await?;
+            Ok(())
+        } else {
+            Err(Error::NodeNotFound(name.to_string()))
+        }
     }
     
-    fn node_len(&self) -> usize {
+    pub async fn drop_node(&self, name: &str) -> Result<(), Error> {
+        if let Some((name, node)) = self.nodes.remove(name) {
+            match node.release().await {
+                Ok(_) => {},
+                Err(NodeError::NodeNotScheduled { ..}) => {},
+                Err(e) => {
+                    self.nodes.insert(name, node);
+                    return Err(Error::NodeError(e))
+                }
+            }
+            Ok(())
+        } else {
+            Err(Error::NodeNotFound(name.to_string()))
+        }
+    }
+    
+    pub async fn get_fb_by_name(&self, name: &str) -> Result<FrameBuffer, Error> {
+        if let Some(node) = self.nodes.get(name) {
+            let node = node.value();
+            Ok(node.get_fb().await)
+        } else {
+            Err(Error::NodeNotFound(name.to_string()))
+        }
+    }
+    
+    pub fn node_len(&self) -> usize {
         self.nodes.len()
     }
     
+    
 }
 
-impl Cluster<'_> {
-    async fn joystick(&self, direction: Option<f64>) -> Result<(), crate::node::error::Error> {
-        todo!()
-        // let tasks = Vec::with_capacity(self.node_len());
-        // for node in self.nodes.iter() {
-        //     tasks.push(tokio::spawn(async move {
-        //         node.joystick(direction).await
-        //     }));
-        // }
-    }
 
-    async fn fire(&self) -> Result<bool, crate::node::error::Error> {
-        todo!()
-    }
-
-    async fn cease(&self) -> Result<bool, crate::node::error::Error> {
-        todo!()
-    }
-
-    async fn skill(&self) -> Result<(), crate::node::error::Error> {
-        todo!()
-    }
-
-    async fn weapon(&self) -> Result<(), crate::node::error::Error> {
-        todo!()
-    }
+#[tokio::test]
+async fn test() -> Result<(), Error> {
+    use serde_json::from_str;
+    let server_configs = from_str(include_str!("../../configs/server.json"))
+        .expect("parse server configs error");
+    let cluster = Cluster::new(server_configs);
+    let mut node_config: VecDeque<NodeConfig> = from_str(include_str!("../../configs/node.json"))
+        .expect("parse adb config error");
+    
+    cluster.new_node(node_config.pop_front().unwrap()).await?;
+    
+    Ok(())
 }

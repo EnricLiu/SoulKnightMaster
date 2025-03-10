@@ -14,6 +14,9 @@ chrono = "0.4.39"
 anyhow = "1.0.96"
 thiserror = "2.0.11"
 
+
+
+axum = { version = "0.8.1", features = ["tokio"] }
 adb_client = { version = "2.1.7" }
 image = "0.25.5"
 log = "0.4.26"

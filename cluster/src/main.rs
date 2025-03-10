@@ -6,10 +6,11 @@ pub mod node;
 
 use dashmap::DashMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use adb_client::{ADBDeviceExt, ADBServer};
 use tokio::sync::watch;
 use crate::node::Node;
+use crate::soul_knight::{Cluster, NodeConfig, NodeError, NodeWatcherSignal, ServerConfig};
 
 static ADB_SERVER_DEFAULT_IP: LazyLock<SocketAddrV4> = LazyLock::new(|| {
     SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5037)
@@ -21,31 +22,41 @@ static ADB_SERVERS: LazyLock<DashMap<SocketAddrV4, ADBServer>> = LazyLock::new(|
     map
 });
 
+static SECRET: &str = include_str!("../configs/secret.txt");
+static SERVER_CONFIGS: LazyLock<Vec<ServerConfig>> = LazyLock::new(|| {
+    let configs = include_str!("../configs/server.json");
+    serde_json::from_str(configs).expect("parse server configs error")
+});
+static CLUSTER: LazyLock<Arc<Cluster>>
+    = LazyLock::new(|| Arc::new(Cluster::new(SERVER_CONFIGS.clone())));
+
 #[tokio::main]
 async fn main() -> Result<(), Box::<dyn std::error::Error>> {
-    use std::net::SocketAddr;
+    use serde_json::from_str;
     
-    let addr = "127.0.0.1:55555";
+    let node_configs: Vec<NodeConfig> = from_str(include_str!("../configs/node.json"))?;
+    CLUSTER.new_node(node_configs.get(0).expect("no node configs").clone()).await?;
+    
     let app = server::route();
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:55555").await?;
     println!("listening on {}", listener.local_addr()?);
     axum::serve(listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     ).await?;
     
     Ok(())
 }
 
 #[tokio::test]
-async fn test() -> Result<(), soul_knight::NodeError> {
-    use soul_knight::*;
+async fn test() -> Result<(), NodeError> {
+    use serde_json;
     use chrono::Local;
+    use soul_knight::*;
 
     const FPS: f64 = 5.0;
     let sleep_duration = std::time::Duration::from_millis((1000.0 / FPS) as u64);
     let mut interval = tokio::time::interval(sleep_duration);
 
-    use serde_json;
     let configs: Vec<NodeConfig> = serde_json::from_str(include_str!("../configs/node.json")).unwrap();
     let config = configs.get(0).unwrap();
 
@@ -68,16 +79,53 @@ async fn test() -> Result<(), soul_knight::NodeError> {
     let mut start = Local::now();
     for i in 0..100 {
         interval.tick().await;
-        let action = Action::new(i, false, Some(i as f64 * pi / 4f64), true, true, true);
-        // let action = Action::new(i, None, true, false, false);
-        node.tick(NodeTickerSignal::Tick(action)).await.expect("???");
+        // let action = Action::new(i, Some(i as f64 * pi / 4f64), true, true, true);
+        let action = Action::new(i, None, true, false, false);
+        // let action = Action::new(i, Some(i as f64 * pi / 4f64), false, false, false);
+        node.act(NodeSignal::Action(action)).await.expect("???");
+        
+        
         let now = Local::now();
         println!("------------->tick<------------ [{}ms]", (now - start).num_milliseconds());
         start = now;
     };
     
-    // adb.release().await;
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_deschedule() -> Result<(), NodeError> {
+    let configs: Vec<NodeConfig> = serde_json::from_str(include_str!("../configs/node.json")).unwrap();
+    let config = configs.get(0).unwrap();
+
+    let node: Node<16> = Node::new(config.clone(), "127.0.0.1:5037".parse().unwrap());
+    let mut watcher: watch::Receiver<NodeWatcherSignal> = node.watch();
+    tokio::spawn(async move {
+        while watcher.changed().await.is_ok() {
+            let signal = watcher.borrow().clone();
+            match signal {
+                NodeWatcherSignal::Error {node_name, err } => {
+                    println!("[Error] Node[{node_name}]: {err}");
+                }
+                _ => {}
+            }
+        }
+    });
+    
+    println!("start");
+    node.schedule().await?;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    println!("stop");
+    node.deschedule().await?;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    println!("start");
+    node.schedule().await?;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    println!("stop");
+    node.deschedule().await?;
+    println!("ok!");
+    
     Ok(())
 }
 
@@ -141,3 +189,4 @@ async fn test() -> Result<(), soul_knight::NodeError> {
 //     }).await.unwrap();
 //     Ok(())
 // }
+
