@@ -114,6 +114,7 @@ pub enum KeyValue {
     Up = 0,
     Down = 1,
 }
+
 impl TryFrom<i32> for KeyValue {
     type Error = String;
 
@@ -139,7 +140,7 @@ impl FromStr for KeyValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
-pub enum NodeEventType {
+pub enum AdbEventType {
     EvSyn = 0,
     EvKey = 1,
     EvAbs = 3,
@@ -147,7 +148,7 @@ pub enum NodeEventType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
-pub enum NodeEvent {
+pub enum AdbEvent {
     AbsMtTrackingId { slot_id: u32 } = 0x0039,
     AbsMtSlot { slot_id: u32 } = 0x002f,
 
@@ -160,7 +161,7 @@ pub enum NodeEvent {
     SynReport(u32)   = 0x0000,
 }
 
-impl NodeEvent {
+impl AdbEvent {
     pub(crate) fn value(&self) -> u32 {
         match self {
             Self::Key(k, _) => *k as u32,
@@ -170,28 +171,28 @@ impl NodeEvent {
 
     pub(crate) fn key_value(&self) -> u32 {
         match self {
-            NodeEvent::AbsMtTrackingId { slot_id } => *slot_id,
-            NodeEvent::AbsMtSlot { slot_id } => *slot_id,
+            AdbEvent::AbsMtTrackingId { slot_id } => *slot_id,
+            AdbEvent::AbsMtSlot { slot_id } => *slot_id,
             
-            NodeEvent::AbsMtPositionX(x) => *x,
-            NodeEvent::AbsMtPositionY(y) => *y,
+            AdbEvent::AbsMtPositionX(x) => *x,
+            AdbEvent::AbsMtPositionY(y) => *y,
             
-            NodeEvent::Key(_, v) => *v as u32,
-            NodeEvent::BtnTouch(v) => *v as u32,
+            AdbEvent::Key(_, v) => *v as u32,
+            AdbEvent::BtnTouch(v) => *v as u32,
             
-            NodeEvent::SynReport(v) => *v,
+            AdbEvent::SynReport(v) => *v,
         }   
     }
 
-    pub(crate) fn ev_type(&self) -> NodeEventType {
+    pub(crate) fn ev_type(&self) -> AdbEventType {
         match self {
-            Self::SynReport(_) => NodeEventType::EvSyn,
+            Self::SynReport(_) => AdbEventType::EvSyn,
             Self::Key(_, _)
-            | Self::BtnTouch(_) => NodeEventType::EvKey,
+            | Self::BtnTouch(_) => AdbEventType::EvKey,
             Self::AbsMtTrackingId { .. }
             | Self::AbsMtSlot { .. }
             | Self::AbsMtPositionX(_)
-            | Self::AbsMtPositionY(_) => NodeEventType::EvAbs,
+            | Self::AbsMtPositionY(_) => AdbEventType::EvAbs,
         }
     }
 
@@ -209,13 +210,13 @@ impl NodeEvent {
 
 #[test]
 fn event() -> Result<(), Box<dyn std::error::Error>> {
-    // let event = NodeEvent::Key(Key::W, KeyValue::Down);
-    let event = NodeEvent::AbsMtPositionY(123);
+    // let event = AdbEvent::Key(Key::W, KeyValue::Down);
+    let event = AdbEvent::AbsMtPositionY(123);
     println!("{:?}", event.to_command());
 
     // let mut event_command = EventCommand::new(String::from("/dev/input/event0"));
     // event_command.append(event);
-    // event_command.append(NodeEvent::SynReport(0));
+    // event_command.append(AdbEvent::SynReport(0));
     // println!("{}", event_command.to_command()?);
     Ok(())
 }

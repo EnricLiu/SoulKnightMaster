@@ -5,7 +5,7 @@ use std::sync::Arc;
 use adb_client::{ADBDeviceExt, ADBServerDevice};
 use tokio::sync::{Mutex};
 
-use crate::node::error::Error;
+use crate::adb::error::Error;
 use crate::utils::log;
 
 pub struct DeviceConnPool<const MAX_POOL_SIZE: usize> {

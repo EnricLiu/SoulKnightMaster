@@ -1,19 +1,19 @@
-use crate::node::error::Error as NodeErr;
+use crate::adb::error::Error as NodeErr;
 use std::net::SocketAddrV4;
 use thiserror::Error as ErrorTrait;
 use tokio::sync::mpsc::error::SendError;
-use super::Action;
-use super::NodeTickerSignal;
+use crate::soul_knight::model::Action;
+use crate::soul_knight::model::NodeTickerSignal;
 
 #[derive(Debug, ErrorTrait)]
 pub enum Error {
     #[error("Node Error: {}", .0)]
     NodeError(#[from] NodeError),
     
-    #[error("node {0} not found")]
+    #[error("adb {0} not found")]
     NodeNotFound(String),
     
-    #[error("node {0} already exists")]
+    #[error("adb {0} already exists")]
     NodeAlreadyExist(String),
     
     #[error("ServerError: {0}")]

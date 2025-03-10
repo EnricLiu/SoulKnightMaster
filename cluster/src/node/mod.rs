@@ -1,270 +1,341 @@
-pub mod event;
-pub mod pool;
-pub mod error;
-pub mod action;
-mod test;
-mod health;
+mod status;
 
-use std::io::Write;
-use std::sync::{Arc, LazyLock};
-use std::sync::atomic::{AtomicUsize, Ordering};
+pub(crate) use status::NodeStatus;
 
+use std::net::SocketAddrV4;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::time::Duration;
 use chrono::Local;
-use tokio::sync::{Mutex};
-use tokio::task::spawn_blocking;
 use image::{ImageBuffer, Rgba};
-use adb_client::{ADBDeviceExt, ADBServerDevice};
+use tokio::sync::{mpsc, watch, RwLock};
+use tokio::task::JoinHandle;
+use crate::adb::Device as InnerNode;
+use crate::adb::pool::DeviceConnPool;
+use crate::soul_knight::Action;
+use crate::soul_knight::{FrameBuffer, NodeError};
+use crate::soul_knight::NodeConfig;
+use crate::utils::{log, Position};
 
-use error::Error;
-use pool::DeviceConnPool;
-use event::{NodeEvent, KeyValue, Key};
-use action::{NodeAction, ActionFactory};
+use crate::adb::event::KeyValue;
+use crate::soul_knight::{NodeTickerSignal, NodeWatcherSignal};
 
-use crate::utils::{get_id, log, Position, START};
-
-#[derive(Debug)]
-pub enum ShellCommand<'a> {
-    Action(NodeAction<'a>),
-    Raw(String)
+pub struct NodeState {
+    direction:  AtomicU64,
+    movement:   AtomicBool,
+    attack:     AtomicBool,
 }
 
-impl ShellCommand<'_> {
-    pub fn to_string(&self) -> String {
-        match self {
-            ShellCommand::Action(action) => action.cmd(),
-            ShellCommand::Raw(cmd) => cmd.clone(),
+impl NodeState {
+    pub fn new() -> Self {
+        NodeState {
+            direction:  AtomicU64::new(0),
+            movement:   AtomicBool::new(false),
+            attack:     AtomicBool::new(false),
+        }
+    }
+
+    pub fn is_moving(&self) -> bool {
+        self.movement.load(Ordering::SeqCst)
+    }
+
+    pub fn is_attacking(&self) -> bool {
+        self.attack.load(Ordering::SeqCst)
+    }
+    
+    pub fn angle(&self) -> Option<f64> {
+        if !self.is_moving() {
+            return None
+        }
+        let u = self.direction.load(Ordering::SeqCst);
+        Some(f64::from_bits(u))
+    }
+    
+    pub fn set_move(&self, angle: Option<f64>) {
+        match angle {
+            None => {
+                self.movement.store(false, Ordering::SeqCst);
+                // self.direction.store(0, Ordering::SeqCst);
+            },
+            Some(angle) => {
+                self.direction.store(angle.to_bits(), Ordering::SeqCst);
+            }
         }
     }
     
-    pub fn into_string(self) -> String {
-        match self {
-            ShellCommand::Action(action) => action.cmd(),
-            ShellCommand::Raw(cmd) => cmd,
-        }
-    }
-}
-
-impl<'a> From<NodeAction<'a>> for ShellCommand<'a> {
-    fn from(action: NodeAction<'a>) -> Self {
-        ShellCommand::Action(action)
-    }
-}
-
-impl From<String> for ShellCommand<'_> {
-    fn from(str: String) -> Self {
-        ShellCommand::Raw(str)
+    pub fn set_attack(&self, attack: bool) {
+        self.attack.store(attack, Ordering::SeqCst);
     }
 }
 
 
 pub struct Node<const POOL_SIZE: usize> {
-    iden:   String,
-    pending_cnt: AtomicUsize,
-    pool:   Arc<Mutex<DeviceConnPool<POOL_SIZE>>>,
+    name:   &'static str,
+    states: Arc<NodeState>,
+    config: Arc<NodeConfig>,
+    node:   Arc<InnerNode<POOL_SIZE>>,
+    frame_buffer: Arc<RwLock<(u64, ImageBuffer<Rgba<u8>, Vec<u8>>)>>,
 
-    action_man: ActionFactory,
-    // health:     NodeHealth
-}
-
-impl<const POOL_SIZE: usize> Default for Node<POOL_SIZE> {
-    fn default() -> Self {
-        let pool = DeviceConnPool::default();
-        Node::new(pool, "/dev/input/event4")
-    }
+    status:     Arc<NodeStatus>,
+    task_cnt:   Arc<AtomicU64>,
+    ticker_rx:  Arc<RwLock<mpsc::Receiver<NodeTickerSignal>>>,
+    ticker_tx:  mpsc::Sender<NodeTickerSignal>,
+    watcher_rx: watch::Receiver<NodeWatcherSignal>,
+    watcher_tx: watch::Sender<NodeWatcherSignal>,
 }
 
 impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
-    pub fn new(pool: DeviceConnPool<POOL_SIZE>, ev_device: &str) -> Self {
-        let ret = Node {
-            iden:           "default".to_string(),
-            pool:           Arc::new(Mutex::new(pool)),
-            action_man:     ActionFactory::new(ev_device),
-            pending_cnt:    AtomicUsize::new(0),
-        };
-        ret
-    }
+    pub fn new(config: NodeConfig, server_addr: SocketAddrV4) -> Self {
+        let name = config.name();
+        let iden = config.iden();
+        let ev_device = config.ev_device();
+        let (watcher_tx, watcher_rx)
+            = watch::channel(NodeWatcherSignal::Created { node_name: config.name() });
+        let (ticker_tx, ticker_rx) = mpsc::channel(8);
+        Node {
+            name,
+            node: Arc::new(InnerNode::new(DeviceConnPool::new(iden, server_addr), ev_device)),
+            states: Arc::new(NodeState::new()),
+            config: Arc::new(config),
+            frame_buffer: Arc::new(Default::default()),
 
-    pub async fn pool_len(&self) -> usize {
-        let pool = self.pool.lock().await;
-        pool.len().await
-    }
-
-    pub fn get_pending_cnt(&self) -> usize {
-        self.pending_cnt.load(Ordering::SeqCst)
-    }
-
-    pub async fn connect(&self) -> Result<(), Error> {
-        let pool = self.pool.lock().await;
-        pool.connect().await?;
-        Ok(())
-    }
-
-    pub async fn get_conn_with_prior(&self, prior: usize) -> Result<ADBServerDevice, Error> {
-        let pool = self.pool.lock().await;
-        if let Some(device) = pool.try_get().await.ok() {
-            return Ok(Arc::try_unwrap(device).or(Err(Error::ArcFailedUnwrap()))?);
-        } else {
-            drop(pool);
-            self.pending_cnt.fetch_add(1, Ordering::SeqCst);
+            status: Arc::new(NodeStatus::new(name, POOL_SIZE)),
+            task_cnt: Arc::new(AtomicU64::new(0)),
+            ticker_tx,
+            ticker_rx: Arc::new(RwLock::new(ticker_rx)),
+            watcher_rx, watcher_tx,
         }
+    }
 
-        // concurrency limitation
-        // default: waiting for 10*100ms, every pending req before contributes 1*100ms more.
-        let poll_epoch = 10 + 1 * self.pending_cnt.load(Ordering::SeqCst);
-        let poll_epoch = poll_epoch.min(prior);
+    pub fn get_status(&self) -> NodeStatus {
+        self.status.as_ref().clone()
+    }
+    
+    pub fn config(&self) -> &Arc<NodeConfig> {
+        &self.config
+    }
+    
+    pub fn watch(&self) -> watch::Receiver<NodeWatcherSignal> {
+        self.watcher_rx.clone()
+    }
+    
+    pub async fn get_fb(&self) -> FrameBuffer {
+        let fb = self.frame_buffer.read().await;
+        let sn = fb.0;
+        let fb = fb.1.clone().into_vec();
+        FrameBuffer::new(self.name, sn, fb)
+    }
+    
+    pub async fn schedule(&self) -> Result<JoinHandle<Result<(), NodeError>>, NodeError> {
+        let fb = self.frame_buffer.clone();
+        let node = self.node.clone();
+        let config = self.config.clone();
+        let states = self.states.clone();
+        let cnt = self.task_cnt.clone();
+        let ticker_rx = self.ticker_rx.clone();
+        let watcher_tx = self.watcher_tx.clone();
+        self.node.connect().await?;
 
-        for _ in 0..poll_epoch {
-            let pool = self.pool.lock().await;
-            if let Some(device) = pool.try_get().await.ok() {
-                self.pending_cnt.fetch_sub(1, Ordering::SeqCst);
-                return Ok(Arc::try_unwrap(device).or(Err(Error::ArcFailedUnwrap()))?);
+        let handle = tokio::spawn(async move {
+            // todo!("refactor into enum");
+            // 0: Running, 1: Stopping, 2: Stopped
+            let status = Arc::new(AtomicU8::new(0));
+            let node_name = config.name();
+            let send_if_err =
+                |res: Result<(), NodeError>,
+                 watcher: &watch::Sender<NodeWatcherSignal>| {
+                    if res.is_ok() { return }
+                    let err = res.unwrap_err().to_string();
+                    watcher
+                        .send(NodeWatcherSignal::Error { node_name, err })
+                        .expect("[Fatal] Watcher Sender Failed to send.");
+                };
+
+            let mut ticker_rx = ticker_rx.write().await;
+            while let Some(action) = ticker_rx.recv().await {
+                match action {
+                    NodeTickerSignal::Tick(action) => {
+                        if status.load(Ordering::SeqCst) > 0 { break }
+                        
+                        let need_fb = action.fb();
+                        let sync_num = action.sn();
+                        
+                        let _cnt = cnt.clone();
+                        let _node = node.clone();
+                        let _config = config.clone();
+                        let _watcher_tx = watcher_tx.clone();
+                        let _states = states.clone();
+                        
+                        let _ev_task_ = tokio::spawn(async move {
+                            let start = Local::now();
+                            _cnt.fetch_add(1, Ordering::SeqCst);
+                            // ------------- attack ------------- 
+                            if action.attack() {
+                                let res = _node
+                                    .tap(_config.keymap_get("attack")).await
+                                    .map_err(|e| NodeError::NodeErr(e));
+                                send_if_err(res, &_watcher_tx);
+                            }
+                            // ------------- skill -------------
+                            if action.skill() {
+                                let res = _node
+                                    .tap(_config.keymap_get("skill")).await
+                                    .map_err(|e| NodeError::NodeErr(e));
+                                send_if_err(res, &_watcher_tx);
+                            }
+                            // ------------- weapon -------------
+                            if action.weapon() {
+                                let res = _node
+                                    .tap(_config.keymap_get("weapon")).await
+                                    .map_err(|e| NodeError::NodeErr(e));
+                                send_if_err(res, &_watcher_tx);
+                            }
+                            // ------------ joystick ------------ 
+                            let res = {
+                                match action.direction() {
+                                    Some(direction) => {
+                                        let distance = 128f64;
+                                        let touch_pos = _config.keymap_get("joystick");
+                                        let target = Position::new(
+                                            (touch_pos.x as i32 + (distance * direction.cos()) as i32) as u32,
+                                            (touch_pos.y as i32 + (distance * direction.sin()) as i32) as u32,
+                                        );
+                                        log(&format!("Target Pos: {target:?}."));
+                                        _node.motion(target, KeyValue::Down).await
+                                    },
+                                    None => {
+                                        _node.motion(Position::new(0,0), KeyValue::Up).await
+                                    }
+                                }.map_err(|e| NodeError::NodeErr(e))
+                            };
+                            send_if_err(res, &_watcher_tx);
+                            _cnt.fetch_sub(1, Ordering::SeqCst);
+                            log(&format!("Node[{node_name}] finish action <-{}->",
+                                         (Local::now() - start).num_milliseconds()));
+                        });
+
+                        // FrameBufferTask
+                        if !need_fb { continue }
+                        
+                        let _fb = fb.clone();
+                        let _cnt = cnt.clone();
+                        let _node = node.clone();
+                        let _watcher_tx = watcher_tx.clone();
+
+                        let _fb_task_ = tokio::spawn(async move {
+                            _cnt.fetch_add(1, Ordering::SeqCst);
+                            let res = tokio::time::timeout(
+                                Duration::from_millis(1000),
+                                async {
+                                    let fb_new = _node.read_frame_buf().await;
+                                    match fb_new {
+                                        Ok(fb_new) => {
+                                            let mut _fb = _fb.write().await;
+                                            *_fb = (sync_num, fb_new);
+                                            println!("[Node] FrameBufferTask: Node[{node_name}] FrameBuffer Updated.");
+                                            Ok(())
+                                        },
+                                        Err(e) => {
+                                            Err(NodeError::NodeErr(e))
+                                        }
+                                    }
+                                }
+                            ).await;
+                            let res = match res {
+                                Ok(res) => res,
+                                Err(_elapsed) => {
+                                    send_if_err(Err(NodeError::ThreadErrorFbTimeout{ node_name, sn: sync_num }), &_watcher_tx);
+                                    Ok(())
+                                }
+                            };
+
+                            send_if_err(res, &_watcher_tx);
+                            _cnt.fetch_sub(1, Ordering::SeqCst);
+                        });
+                        
+                    },
+                    NodeTickerSignal::Close => {
+                        if let Ok(_) = status.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst) {
+                            let res = tokio::time::timeout(
+                                Duration::from_secs(3),
+                                async {
+                                    loop {
+                                        if cnt.load(Ordering::SeqCst) == 0 { break; }
+                                        tokio::time::sleep(Duration::from_millis(100)).await;
+                                    }
+                                }
+                            ).await;
+                            match res {
+                                Ok(_) => {
+                                    log(&format!("[Node] Node[{node_name}] Closed."));
+                                },
+                                Err(_elapsed) => {
+                                    todo!();
+                                    // log(&format!("[Node] Node[{node_name}] Closed."));
+                                    // send_if_err(Err(NodeError::ThreadErrorFbTimeout{ node_name, sn: fb_sn }),&watcher_tx;)
+                                }
+                            }
+                        }
+                        let res = node.motion(Position::new(0,0), KeyValue::Up)
+                            .await.map_err(|e| NodeError::NodeErr(e));
+                        send_if_err(res, &watcher_tx);
+
+                        if cnt.load(Ordering::SeqCst) == 0 {
+                            break;
+                        }
+                    },
+                    _ => {
+                        todo!();
+                    }
+                }
             };
-            drop(pool);
-            log("Waiting");
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            Ok(())
+        });
+        Ok(handle)
+    }
+
+    pub async fn deschedule(&self) {
+        todo!()
+    }
+    
+    pub async fn tick(&self,
+                      signal: NodeTickerSignal
+    ) -> Result<Arc<RwLock<(u64, ImageBuffer<Rgba<u8>, Vec<u8>>)>>, NodeError> {
+        if let Err(err) = self.ticker_tx.send(signal).await {
+            return Err(NodeError::ThreadErrorSend { node_name: self.name, err });
         }
-
-        self.pending_cnt.fetch_sub(1, Ordering::SeqCst);
-        Ok(Arc::try_unwrap(self.pool.lock().await.make_conn().await).or(Err(Error::ArcFailedUnwrap()))?)
+        Ok(self.frame_buffer.clone())
     }
-
-    pub async fn get_conn(&self) -> Result<ADBServerDevice, Error> {
-        self.get_conn_with_prior(usize::MAX).await
-    }
-
-    pub async fn read_frame_buf(&self) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, Error> {
-        let mut conn = self.get_conn().await?;
-
-        let task_id = get_id();
-        
-        let start = Local::now();
-        log(&format!("[{task_id}] Reading FB!"));
-
-        let task = spawn_blocking(move || {
-            let res = conn.framebuffer_inner();
-            log(&format!("[{task_id}] FB Read! <-{}ms->", (Local::now() - start).num_milliseconds()));
-            (res, conn)
-        });
-
-        let pool = self.pool.clone();
-        let res = tokio::spawn(async move {
-            let (res, conn) = task.await?;
-            pool.lock().await.release(Arc::new(conn)).await;
-            Ok(res?)
-        }).await?;
-
-        res
-    }
-
-    pub async fn read_frame_buf_bytes(&self) -> Result<Vec<u8>, Error> {
-        let mut conn = self.get_conn().await?;
-
-        let task_id = get_id();
-        log(&format!("[{task_id}] Spawn!!  [{}]", Local::now().timestamp_micros() - *START));
-
-        let task = spawn_blocking(move || {
-            let res = conn.framebuffer_bytes();
-            log(&format!("[{task_id}] Joined!! [{}]", Local::now().timestamp_micros() - *START));
-            (res, conn)
-        });
-
-        let pool = self.pool.clone();
-        let res = tokio::spawn(async move {
-            let (res, conn) = task.await?;
-            pool.lock().await.release(Arc::new(conn)).await;
-            Ok(res?)
-        }).await?;
-
-        res
-    }
-}
-
-impl<'a, const POOL_SIZE: usize> Node<POOL_SIZE> {
-    pub(crate) async fn send_action(&self, action: &ShellCommand<'_>) -> Result<(), Error> {
-        let mut conn = self.get_conn().await?;
-        let command = action.to_string();
-        let task = spawn_blocking(move || {
-            let res = conn.shell_command(
-                &[command.as_ref()],
-                &mut ShellReturnHandler{});
-
-            (res, conn)
-        });
-        let (_, conn) = task.await?;
-        self.pool.lock().await.release(Arc::new(conn)).await;
-        Ok(())
-    }
-
-    pub async fn key_down(&self, key: Key) -> Result<(), Error> {
-        let action = self.action_man.get_key_down_action(key).await;
-        let command = action.into();
-        log(&format!("KeyDown {:?}", &command));
-        self.send_action(&command).await?;
-        Ok(())
-    }
-    pub async fn key_up(&self, key: Key) -> Result<(), Error> {
-        let action = self.action_man.get_key_up_action(key).await;
-        let command = action.into();
-        log(&format!("KeyUp {:?}", &command));
-        self.send_action(&command).await?;
-        Ok(())
-    }
-
-    pub async fn touch_down(&self, iden: &'a str, pos: Position<u32>) -> Result<(), Error> {
-        let action = self.action_man.get_touch_down_action(iden, pos).await;
-        if action.is_none() { return Ok(()) };
-        let command = action.unwrap().into();
-        log(&format!("TouchDown['{iden}'] {:?}", &command));
-        self.send_action(&command).await?;
-        Ok(())
-    }
-
-    pub async fn touch_move(&self, iden: &'a str, pos: Position<u32>) -> Result<(), Error> {
-        let action = self.action_man.get_touch_move_action(iden, pos).await;
-        if action.is_none() { return Ok(()) };
-        let command = action.unwrap().into();
-        log(&format!("TouchMove['{iden}'] {:?}", &command));
-        self.send_action(&command).await?;
-        Ok(())
-    }
-
-    pub async fn touch_up(&self, iden: &'a str) -> Result<(), Error> {
-        let action = self.action_man.get_touch_up_action(iden).await;
-        if action.is_none() { return Ok(()) };
-        let command = action.unwrap().into();
-        log(&format!("TouchUp['{iden}'] {:?}", &command));
-        self.send_action(&command).await?;
-        Ok(())
-    }
-}
-
-
-
-pub struct EventParser {
     
-}
-
-impl Write for EventParser {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        println!("{}", String::from_utf8_lossy(buf));
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-pub struct ShellReturnHandler {
     
+    pub async fn release(&self) {
+        todo!()
+    }
 }
-impl Write for ShellReturnHandler {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        println!("{}", String::from_utf8_lossy(buf));
-        Ok(buf.len())
-    }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
+
+#[tokio::test]
+async fn test() -> Result<(), NodeError> {
+    const FPS: f64 = 10.0;
+    let sleep_duration = std::time::Duration::from_millis((1000.0 / FPS) as u64);
+    let mut interval = tokio::time::interval(sleep_duration);
+    
+    use serde_json;
+    let configs: Vec<NodeConfig> = serde_json::from_str(include_str!("../../configs/node.json")).unwrap();
+    let config = configs.get(0).unwrap();
+    
+    let node: Node<16> = Node::new(config.clone(), "127.0.0.1:5037".parse().unwrap());
+    let _handle = node.schedule().await?;
+    
+    for i in 0..100 {
+        // let action = Action::new(i, Some(0.0), true, true, true);
+        let action = Action::new(i, false, None, false, false, true);
+        node.tick(NodeTickerSignal::Tick(action)).await.expect("我超");
+        interval.tick().await;
+        println!("tick!!!!!")
+    };
+    
+    Ok(())
 }
