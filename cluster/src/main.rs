@@ -35,7 +35,11 @@ async fn main() -> Result<(), Box::<dyn std::error::Error>> {
     use serde_json::from_str;
     
     let node_configs: Vec<NodeConfig> = from_str(include_str!("../configs/node.json"))?;
-    CLUSTER.new_node(node_configs.get(0).expect("no node configs").clone()).await?;
+    // CLUSTER.new_node(node_configs.get(0).expect("no node configs").clone()).await?;
+    for node_config in node_configs {
+        println!("new node: {:?}", node_config);
+        CLUSTER.new_node(node_config).await.expect("new node error");
+    }
     
     let app = server::route();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:55555").await?;

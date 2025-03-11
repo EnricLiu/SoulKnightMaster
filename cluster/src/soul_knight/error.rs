@@ -1,9 +1,7 @@
 use crate::adb::error::Error as AdbError;
-use std::net::SocketAddrV4;
 use thiserror::Error as ErrorTrait;
 use tokio::sync::{mpsc, watch};
 use crate::soul_knight::FrameBuffer;
-use crate::soul_knight::model::Action;
 use crate::soul_knight::model::NodeSignal;
 
 #[derive(Debug, ErrorTrait)]

@@ -10,7 +10,7 @@ use crate::soul_knight::{Action, FrameBuffer, NodeError};
 
 pub struct Cluster {
     // name -> Node
-    nodes: DashMap<String, Node<8>>,
+    nodes: DashMap<String, Node<12>>,
     // name -> ADBServer
     servers: DashMap<String, Server>,
 }
@@ -50,8 +50,10 @@ impl Cluster {
     
     pub async fn act_by_name(&self, name: &str, action: Action) -> Result<(), Error> {
         if let Some(node) = self.nodes.get(name) {
-            node.value().act(NodeSignal::Action(action)).await?;
-            Ok(())
+            match node.value().act(NodeSignal::Action(action)).await {
+                Ok(_) => Ok(()),
+                Err(e) => Err(Error::NodeError(e))
+            }
         } else {
             Err(Error::NodeNotFound(name.to_string()))
         }

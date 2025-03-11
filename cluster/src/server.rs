@@ -18,29 +18,9 @@ use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::{CLUSTER, SECRET};
-use crate::soul_knight::FrameBuffer;
+use crate::soul_knight::{Error, FrameBuffer};
 use crate::soul_knight::Action;
 use crate::utils::log;
-
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct WsConnQuery {
-    secret: Option<String>
-}
-
-impl WsConnQuery {
-    pub fn is_valid(&self) -> bool {
-        self.secret.as_ref().map(|s| s == SECRET).unwrap_or(false)
-    }
-}
-
-pub fn route() -> Router {
-    Router::new()
-        .route("/fb", get(get_fb))
-        .route("/devices", get(get_all_devices))
-        .route("/action", post(post_action))
-}
-
 
 static TEST_PNG: LazyLock<FrameBuffer> = LazyLock::new(|| {
     let reader = ImageReader::open("res/test_big.png").unwrap();
@@ -49,32 +29,64 @@ static TEST_PNG: LazyLock<FrameBuffer> = LazyLock::new(|| {
     FrameBuffer::new("test", 0, image.into_raw())
 });
 
+pub fn route() -> Router {
+    Router::new()
+        .route("/fb", get(get_fb))
+        .route("/devices", get(get_all_devices))
+        .route("/action", post(post_action))
+        .route("/deschedule_all", get(deschedule_all))
+        .route("/schedule_all", get(schedule_all))
+}
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize)]
+pub struct ErrResponse<'a> {
+    #[serde(skip)]
+    status: StatusCode,
+
+    r#type: &'a str,
+    msg:  String,
+}
+
+impl<'a> ErrResponse<'a> {
+    pub fn err(status: StatusCode, r#type: &'a str, msg: String) -> Self {
+        ErrResponse {
+            status, r#type, msg,
+        }
+    }
+}
+
+impl From<Error> for ErrResponse<'_> {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::NodeError(e) => {
+                ErrResponse::err(StatusCode::INTERNAL_SERVER_ERROR, "node error", e.to_string())
+            }
+            Error::NodeNotFound(_) => {
+                ErrResponse::err(StatusCode::NOT_FOUND, "node error", "Node Not Found".to_string())
+            }
+            Error::ServerErr(e) => {
+                ErrResponse::err(StatusCode::INTERNAL_SERVER_ERROR, "server error", e.to_string())
+            },
+            _ => {
+                ErrResponse::err(StatusCode::INTERNAL_SERVER_ERROR, "unknown error", e.to_string())
+            }
+        }
+    }
+}
+
+impl IntoResponse for ErrResponse<'_> {
+    fn into_response(self) -> Response {
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        (self.status, headers, Json::from(self)).into_response()
+    }
+}
+
+
+# [derive(Debug, Deserialize)]
 pub struct GetFbParams {
     node: String,
 }
-
-// async fn get_fb(
-//     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
-//     Query(query): Query<Vec<GetFbParams>>,
-// ) -> impl IntoResponse {
-//     let mut ret = Vec::with_capacity(query.len());
-//
-//     for param in query {
-//         let node_name = param.node;
-//         let fb = CLUSTER.get_fb_by_name(&node_name).await;
-//         if let Ok(fb) = fb {
-//             ret.push(fb);
-//         }
-//     }
-//
-//     let mut headers = HeaderMap::new();
-//     headers.insert("Content-Type", "application/json".parse().unwrap());
-//
-//     (headers, Json::from(ret))
-//
-// }
 
 async fn get_fb(
     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
@@ -82,14 +94,17 @@ async fn get_fb(
 ) -> Response {
     log(&format!("<GET> framebuffer: {:?}", query));
     let node_name = query.node;
-    let fb = CLUSTER.get_fb_by_name(&node_name).await;
-    if let Ok(fb) = fb {
-        let mut headers = HeaderMap::new();
-        headers.insert("Content-Type", "application/octet-stream".parse().unwrap());
-        let fb = fb.unwrap().2;
-        (headers, Bytes::from(fb)).into_response()
-    } else {
-        (StatusCode::BAD_REQUEST, "node not found").into_response()
+
+    match CLUSTER.get_fb_by_name(&node_name).await {
+        Ok(fb) => {
+            let mut headers = HeaderMap::new();
+            headers.insert("Content-Type", "application/octet-stream".parse().unwrap());
+            let fb = fb.unwrap().2;
+            (headers, Bytes::from(fb)).into_response()
+        },
+        Err(e) => {
+            ErrResponse::from(e).into_response()
+        }
     }
 }
 
@@ -101,24 +116,73 @@ async fn get_all_devices(
     Json::from(devices)
 }
 
+
 pub struct GetScheduleParams {
     node: String,
 }
 
-// async fn get_schedule(
-//     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
-//     Query(query): Query<GetScheduleParams>,
-// ) -> impl IntoResponse {
-//     let node_name = query.node;
-//     let schedule = CLUSTER.schedule_node(&node_name).await;
-//     if let Ok(schedule) = schedule {
-//         let mut headers = HeaderMap::new();
-//         headers.insert("Content-Type", "application/json".parse().unwrap());
-//         (headers, Json::from(json!(r#"{"node": {}"#))).into_response()
-//     } else {
-//         (StatusCode::BAD_REQUEST, "node not found").into_response()
-//     }
-// }
+#[derive(Debug, Serialize)]
+pub struct DefaultResponse<'a> {
+    node: &'a str,
+    success: bool,
+    error: Option<ErrResponse<'a>>
+}
+
+impl<'a> DefaultResponse<'a> {
+    pub fn err(node: &'a str, e: ErrResponse<'a>) -> Self {
+        DefaultResponse { node, success: false, error: Some(e) }
+    }
+    
+    pub fn ok(node: &'a str) -> Self {
+        DefaultResponse { node, success: true, error: None }
+    }
+    
+    pub fn from_result(node: &'a str, result: Result<(), Error>) -> Self {
+        match result {
+            Ok(_) => DefaultResponse::ok(node),
+            Err(e) => DefaultResponse::err(node, e.into()),
+        }
+    }
+}
+
+impl IntoResponse for DefaultResponse<'_> {
+    fn into_response(self) -> Response {
+        Json::from(self).into_response()
+    }
+}
+
+async fn schedule(
+    ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+    Query(query): Query<GetScheduleParams>,
+) -> Response {
+    let node_name = query.node;
+    DefaultResponse::from_result(&node_name, CLUSTER.schedule_node(&node_name).await).into_response()
+}
+
+async fn deschedule_all(
+    ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    let all_devices = CLUSTER.all_devices();
+    let mut resp = Vec::with_capacity(all_devices.len());
+    for status in all_devices {
+        let node = status.name;
+        resp.push(DefaultResponse::from_result(&node, CLUSTER.deschedule_node(node).await))
+    }
+
+    Json::from(resp).into_response()
+}
+
+async fn schedule_all(
+    ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    let all_devices = CLUSTER.all_devices();
+    let mut resp = Vec::with_capacity(all_devices.len());
+    for status in all_devices {
+        let node = status.name;
+        resp.push(DefaultResponse::from_result(node, CLUSTER.schedule_node(node).await))
+    }
+    Json::from(resp).into_response()
+}
 
 #[derive(Debug, Deserialize)]
 pub struct PostActionParam {
@@ -126,48 +190,19 @@ pub struct PostActionParam {
     action: Action,
 }
 
-#[derive(Debug, Serialize)]
-pub struct PostActionResponse {
-    success:    bool,
-    node:       String,
-    msg:        Option<String>,
-}
-
-impl PostActionResponse {
-    pub fn ok(node: String) -> Self {
-        PostActionResponse {
-            success: true,
-            msg: None,
-            node,
-        }
-    }
-    
-    pub fn err(node: String, msg: String) -> Self {
-        PostActionResponse {
-            success: false,
-            msg: Some(msg),
-            node,
-        }
-    }
-}
-
 async fn post_action(
     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
     Json(params): Json<Vec<PostActionParam>>,
-) -> impl IntoResponse {
-    let mut ret: Vec<PostActionResponse> = Vec::with_capacity(params.len());
+) -> Response {
+    let mut ret: Vec<DefaultResponse> = Vec::with_capacity(params.len());
     
-    for param in params {
-        let node_name = param.node;
-        let action = param.action;
-        if let Err(e) = CLUSTER.act_by_name(&node_name, action).await {
-            ret.push(PostActionResponse::err(node_name, e.to_string()));
-        } else {
-            ret.push(PostActionResponse::ok(node_name));
-        }
+    for param in params.iter() {
+        let node_name = &param.node;
+        ret.push(DefaultResponse::from_result(
+            node_name, CLUSTER.act_by_name(node_name, param.action.clone()).await))
     }
     
-    Json::from(ret)
+    Json::from(ret).into_response()
 }
 
 #[tokio::test]

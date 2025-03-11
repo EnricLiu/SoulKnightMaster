@@ -90,6 +90,8 @@ pub struct Node<const POOL_SIZE: usize> {
 }
 
 impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
+    const FB_INTERVAL_MS: u64 = 250; //ms
+    
     pub fn new(config: NodeConfig, server_addr: SocketAddrV4) -> Self {
         let name = config.name();
         let iden = config.iden();
@@ -137,6 +139,9 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
     }
     
     pub async fn act(&self, signal: NodeSignal) -> Result<(), NodeError> {
+        if !self.status.snap().is_ready() {
+            return Err(NodeError::NodeNotScheduled { name: self.name })
+        }
         self.act_tx.send(signal).await
             .map_err(|err| NodeError::SendErrorAction { name: self.name, err })
     }
@@ -152,7 +157,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
         node.connect().await?;
         
         let status = self.status.clone();
-        status.set_status(NodeStatusCode::IDLE);
+        self.status.set_status(NodeStatusCode::IDLE);
         
         let act_sn = self.act_sn.clone();
         let act_rx = self.act_rx.clone();
@@ -175,8 +180,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                     .expect("[Fatal] Result Sender Failed to send.");
             };
 
-        status.set_status(NodeStatusCode::RUNNING);
-        
+        self.status.set_status(NodeStatusCode::RUNNING);
         let schedule = tokio::spawn(async move {
             
             let action
@@ -185,6 +189,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
             
             let _device = node.clone();
             let _action = action.clone();
+            let _status = status.clone();
             let _config = config.clone();
             let _act_sn = act_sn.clone();
             let _res_tx = res_tx.clone();
@@ -193,6 +198,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                 let attack_flag = Arc::new(AtomicBool::new(false));
                 loop {
                     if _stop_flag.load(Ordering::SeqCst) { break }
+                    _status.task_start();
                     let action = _action.read().await;
                     let curr_sn = _act_sn.load(Ordering::SeqCst);
                     if curr_sn < action.sn() {
@@ -241,7 +247,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                             attack_flag.store(false, Ordering::SeqCst);
                         }
                     }
-                    
+                    _status.task_end();
                     perf_log(&format!("[{name}] Action finished"), start);
                     tokio::time::sleep(Duration::from_millis(60)).await;
                 };
@@ -249,14 +255,15 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                 Ok(())
             });
             
-            
             let _action = action.clone();
+            let _status = status.clone();
             let _stop_flag = stop_flag.clone();
             let _recv_task_ = tokio::spawn(async move {
                 let mut _act_rx = act_rx.try_lock();
                 if let Err(_) = _act_rx {
                     return Err(NodeError::NodeAlreadyScheduled { name })
                 }
+                _status.task_start();
                 let mut _act_rx = _act_rx.unwrap();
                 while let Some(signal) = _act_rx.recv().await {
                     match signal {
@@ -273,6 +280,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                 };
                 _stop_flag.store(true, Ordering::SeqCst);
                 log(&format!("[{name}] Recv task finished."));
+                _status.task_end();
                 Ok(())
             });
             
@@ -286,10 +294,11 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
             let _fb_task_ = tokio::spawn(async move {
                 let mut sn = 0;
                 let mut tasks = VecDeque::new();
-                let mut interval = tokio::time::interval(Duration::from_millis(100));
+                let mut interval = tokio::time::interval(Duration::from_millis(Self::FB_INTERVAL_MS));
                 
                 loop {
                     if _stop_flag.load(Ordering::SeqCst) { break }
+                    _status.task_start();
                     sn += 1;
                     interval.tick().await;
                     let _old_sn = _fb_sn.load(Ordering::SeqCst);
@@ -298,11 +307,12 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                     }
             
                     let __device = _device.clone();
+                    let __status = _status.clone();
                     let __fb_sn = _fb_sn.clone();
                     let __fb_tx = _fb_tx.clone();
                     let __res_tx = _res_tx.clone();
-            
                     let task = tokio::spawn(async move {
+                        __status.task_start();
                         let res = tokio::time::timeout(
                             Duration::from_millis(1000),
                             async {
@@ -316,6 +326,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                             }
                         ).await.map_err(|_| NodeError::FbTimeout { name, sn });
                         send_if_err(res, &__res_tx);
+                        __status.task_end();
                     });
             
                     tasks.push_back((sn, task));
@@ -333,6 +344,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                             break;
                         }
                     }
+                    _status.task_end();
                 }
                 
                 for (_, task) in tasks {
