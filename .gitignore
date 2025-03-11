@@ -7,8 +7,15 @@ __pycache__
 # mp4
 *.mp4
 # test files
+*_test.*
 test.*
 test
+# output files
+*_out.*
+out.*
+*_out
+# datasets
+tools/replay_recorder/datasets
 
 maafw_test/config
 maafw_test/debug
@@ -17,3 +24,6 @@ tools/psd_parser/res
 
 # conda env
 workenv
+
+# vscode
+*.code-workspace

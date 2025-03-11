@@ -1,1 +1,1 @@
-from psd_parser import read_areas
+from .psd_parser import read_areas

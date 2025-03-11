@@ -1,39 +1,36 @@
 {
-    "SoulKnightReplayRecorderConfig": {
+    "ADBConfig":{
+        "adbHost": "127.0.0.1",
+        "adbPort": 16384,
+        "adbWorkdir": "/sdcard/soul_knight_master",
+        "adbTimeout": 5
+    },
 
-        "ADBConfig":{
-            "adbHost": "127.0.0.1",
-            "adbPort": 16384,
-            "adbWorkdir": "/sdcard/soul_knight_master",
-            "adbTimeout": 5
-        },
+    "ScreenRecorderConfig": {
+        "recordTimeout": 5
+    },
 
-        "ScreenRecorderConfig": {
-            "recordTimeout": 5
-        },
-
-        "ActionListenerConfig": {
-            "regions": {
-                "joystick": {
-                    "region_type": "circle",
-                    "center": { "x": 180, "y": 240 },
-                    "radius": 269
-                },
-                "btn_atk": {
-                    "region_type": "circle",
-                    "center": { "x": 140, "y": 1020 },
-                    "radius": 88
-                },
-                "btn_skill": {
-                    "region_type": "circle",
-                    "center": { "x": 120, "y": 1180 },
-                    "radius": 59
-                },
-                "btn_weapon": {
-                   "region_type": "circle",
-                   "center": { "x": 270, "y": 1180 },
-                   "radius": 60
-                }
+    "ActionListenerConfig": {
+        "regions": {
+            "joystick": {
+                "region_type": "circle",
+                "center": { "x": 180, "y": 240 },
+                "radius": 269
+            },
+            "btn_atk": {
+                "region_type": "circle",
+                "center": { "x": 140, "y": 1020 },
+                "radius": 88
+            },
+            "btn_skill": {
+                "region_type": "circle",
+                "center": { "x": 120, "y": 1180 },
+                "radius": 59
+            },
+            "btn_weapon": {
+                "region_type": "circle",
+                "center": { "x": 270, "y": 1180 },
+                "radius": 60
             }
         }
     }

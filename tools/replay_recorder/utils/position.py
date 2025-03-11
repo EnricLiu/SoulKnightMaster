@@ -1,4 +1,5 @@
 import math
+from typing import Callable
 
 class Position:
     Epsilon = 1e-6
@@ -6,9 +7,26 @@ class Position:
         self.x = x
         self.y = y
     
-    def set_x(self, x: float): self.x = x
-    def set_y(self, y: float): self.y = y
+    def set_x(self, x: float|Callable) -> 'Position':
+        if callable(x):
+            self.x = x(self)
+        else:
+            self.x = x
+        return self
+    
+    def set_y(self, y: float|Callable) -> 'Position':
+        if callable(y): 
+            self.y = y(self)
+        else:
+            self.y = y
+        return self
+    
+    def to_tuple(self):
+        return (self.x, self.y)
 
+    def round_to_tuple(self):
+        return (round(self.x), round(self.y))
+    
     def swap(self) -> 'Position':
         self.x, self.y = self.y, self.x
         return self
@@ -37,3 +55,7 @@ class Position:
     
     def __sub__(self, other: 'Position'):
         return Position(self.x - other.x, self.y - other.y)
+
+if __name__ == "__main__":
+    p1 = Position(1, 2)
+    print(p1.offset_polar(1, math.pi))
