@@ -1,0 +1,136 @@
+{
+    "ip": "127.0.0.1",
+    "port": 55555,
+
+    "ckpts": {
+        "game_over": {
+            "image": "./configs/image_ckpts/game_over.png",
+            "threshold": 60
+        },
+        "choose_character": {
+            "image": "./configs/image_ckpts/choose_character.png",
+            "threshold": 60
+        },
+        "character_ready": {
+            "image": "./configs/image_ckpts/character_ready.png",
+            "threshold": 60
+        },
+        "character_started": {
+            "image": "./configs/image_ckpts/character_started.png",
+            "threshold": 60
+        },
+        "choose_mode": {
+            "image": "./configs/image_ckpts/choose_mode.png",
+            "threshold": 60
+        },
+        "portal": {
+            "image": "./configs/image_ckpts/portal.png",
+            "threshold": 100
+        }
+    },
+    "task_flow": {
+        "restart": [
+            {
+                "action": "click",
+                "pos": {
+                    "x": 500,
+                    "y": 420
+                }
+            },
+            {
+                "action": "detect",
+                "ckpt": "game_over",
+                "timeout": 5
+            },
+            {
+                "action": "click",
+                "pos": {
+                    "x": 630,
+                    "y": 630
+                }
+            },
+            {
+                "action": "wait",
+                "time": 1
+            },
+            {
+                "action": "click",
+                "pos": {
+                    "x": 630,
+                    "y": 630
+                }
+            },
+            {
+                "action": "detect",
+                "ckpt": "choose_character",
+                "timeout": 6
+            },
+            {
+                "action": "click",
+                "pos": {
+                    "x": 425,
+                    "y": 640
+                }
+            },
+            {
+                "action": "detect",
+                "ckpt": "character_ready",
+                "timeout": 2
+            },
+            {
+                "action": "click",
+                "pos": {
+                    "x": 1100,
+                    "y": 640
+                }
+            },
+            {
+                "action": "detect",
+                "ckpt": "character_started",
+                "timeout": 2
+            },
+            {
+                "action": "move",
+                "direction": 90,
+                "duration": 1
+            },
+            {
+                "action": "move",
+                "direction": 0,
+                "duration": 5.5
+            },
+            {
+                "action": "move",
+                "direction": -90,
+                "duration": 3.5
+            },
+            {
+                "action": "move",
+                "direction": 180,
+                "duration": 4
+            },
+            {
+                "action": "move",
+                "direction": -45,
+                "duration": 1.5
+            },
+            {
+                "action": "detect",
+                "ckpt": "choose_mode",
+                "timeout": 2
+            },
+            {
+                "action": "click",
+                "pos": {
+                    "x": 320,
+                    "y": 640
+                }
+            },
+            {
+                "action": "detect",
+                "ckpt": "portal",
+                "timeout": 3
+            }
+        ]
+    }
+}
