@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RL Performance Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        html {
+            visibility: hidden;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+
+        .font-geist-mono {
+            font-family: 'Inter', monospace;
+        }
+
+        .node-card {
+            transition: all 0.2s ease;
+        }
+
+        .node-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .usage-bar {
+            transition: width 0.3s ease;
+        }
+
+        body.dark {
+            background-color: #1f2937;
+            color: #f3f4f6;
+        }
+
+        body.dark .bg-white {
+            background-color: #374151;
+        }
+
+        body.dark .bg-gray-50,
+        body.dark .bg-gray-100 {
+            background-color: #111827;
+        }
+
+        body.dark .border-gray-200 {
+            border-color: #4b5563;
+        }
+
+        body.dark .text-gray-900 {
+            color: #f9fafb;
+        }
+
+        body.dark .text-gray-500,
+        body.dark .text-gray-600,
+        body.dark .text-gray-400 {
+            color: #d1d5db;
+        }
+
+        body.dark .bg-gray-200 {
+            background-color: #374151;
+        }
+
+        body.dark .text-gray-700 {
+            color: #e5e7eb;
+        }
+
+        body.dark #loading-indicator {
+            background-color: rgba(31, 41, 55, 0.5);
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+
+        body.dark::-webkit-scrollbar-track {
+            background: #2d3748;
+        }
+
+        body.dark::-webkit-scrollbar-thumb {
+            background: #4a5568;
+        }
+
+        body.dark::-webkit-scrollbar-thumb:hover {
+            background: #718096;
+        }
+
+        .gradient-green {
+            background: linear-gradient(to right, #10b981, #34d399);
+        }
+
+        .gradient-yellow {
+            background: linear-gradient(to right, #f59e0b, #fbbf24);
+        }
+
+        .gradient-red {
+            background: linear-gradient(to right, #ef4444, #f87171);
+        }
+
+        .theme-toggle-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            transition: all 0.15s ease;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .theme-toggle-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .theme-icon {
+            width: 20px;
+            height: 20px;
+            transition: all 0.15s ease;
+        }
+
+        body.dark .theme-toggle-button {
+            background: #4B5563;
+            border: 1px solid #6B7280;
+        }
+
+        body:not(.dark) .theme-toggle-button {
+            background: linear-gradient(135deg, #f0f9ff, #e2e8f0);
+            border: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 p-6 h-full">
+    <div id="loading-indicator"
+        class="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-gray-100 bg-opacity-50 z-50 hidden">
+        <div class="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-blue-500"></div>
+    </div>
+
+    <div id="error-message"
+        class="fixed top-4 right-4 bg-red-200 text-red-700 border border-red-500 rounded p-4 shadow-md hidden">
+        <span></span>
+        <button onclick="hideError()"
+            class="ml-4 px-2 py-1 bg-red-500 text-white rounded hover:bg-red-700">Close</button>
+    </div>
+
+    <div class="max-w-7xl mx-auto h-full flex flex-col">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-semibold text-gray-900">Performance Monitor</h1>
+                <p class="text-sm text-gray-500 mt-1">Real-time node performance visualization</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center bg-white rounded-md px-3 py-1.5 border border-gray-200">
+                    <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span class="ml-2 text-sm text-gray-600">System Active</span>
+                </div>
+                <button id="theme-toggle" class="theme-toggle-button">
+                    <svg id="theme-toggle-dark-icon" class="theme-icon hidden" fill="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path
+                            d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" />
+                    </svg>
+                    <svg id="theme-toggle-light-icon" class="theme-icon hidden" fill="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path
+                            d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58a.996.996 0 0 0-1.41 0 .996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37a.996.996 0 0 0-1.41 0 .996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0a.996.996 0 0 0 0-1.41l-1.06-1.06zm1.06-10.96a.996.996 0 0 0 0-1.41.996.996 0 0 0-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36a.996.996 0 0 0 0-1.41.996.996 0 0 0-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6" id="nodes-container">
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">System Visualization</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div class="aspect-[16/9] bg-gray-100 rounded-md">
+                    <canvas id="usageChart"></canvas>
+                </div>
+                <div class="aspect-[16/9] bg-gray-100 rounded-md">
+                    <canvas id="tasksChart"></canvas>
+                </div>
+            </div>
+            <div class="aspect-[16/9] bg-gray-100 rounded-md flex items-center justify-center">
+                <span class="text-gray-400 font-geist-mono">1280 x 720 Visualization Area</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const throttle = (func, limit) => {
+            let inThrottle;
+            return function () {
+                const args = arguments;
+                const context = this;
+                if (!inThrottle) {
+                    func.apply(context, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            }
+        }
+
+        window.addEventListener("wheel", (e) => {
+            const isPinching = e.ctrlKey;
+            if (isPinching) e.preventDefault();
+        }, { passive: false });
+
+        // let nodes = [
+        //     { id: 1, name: "Primary Node", threads: 8, usage: 65, pending: 3 },
+        //     { id: 2, name: "Secondary Node", threads: 12, usage: 78, pending: 5 },
+        //     { id: 3, name: "Backup Node", threads: 6, usage: 45, pending: 2 },
+        //     { id: 4, name: "Processing Node", threads: 16, usage: 92, pending: 7 },
+        //     { id: 5, name: "Worker Node", threads: 10, usage: 55, pending: 4 },
+        //     { id: 6, name: "Auxiliary Node", threads: 14, usage: 83, pending: 6 }
+        // ];
+
+        let nodes = [];
+
+        let historyData = {};
+
+        function getUsageGradient(usage) {
+            if (usage === 0) return 'gradient-gray';
+            if (usage < 60) return 'gradient-green';
+            if (usage < 80) return 'gradient-yellow';
+            return 'gradient-red';
+        }
+
+        const nodesContainer = document.getElementById('nodes-container');
+
+        const refreshNodes = async () => {
+            return new Promise((resolve, reject) => {
+                fetch("/all_node")
+                    .then(res => res.json())
+                    .then(res => {
+                        nodes = res.map(node => {
+                            let usage = 100 - 100 * node.free_thread / node.total_thread
+                            usage = isNaN(usage) ? 0 : usage
+                            return {
+                                id:         parseInt(node.name.split("_")[1]),
+                                name:       node.name,
+                                threads:    node.total_thread,
+                                pending:    node.task_cnt,
+                                usage,
+                            }
+                        })
+                        resolve()
+                    })
+                    .catch(err => {
+                        console.error(err)
+                        reject(err)
+                    })
+            })
+        };
+
+        function initializeNodeCards() {
+            nodesContainer.innerHTML = nodes.map((node, index) => {
+                const usageGradient = getUsageGradient(node.usage);
+                return `
+                    <div id="node-card-${node.id}" class="node-card bg-white rounded-lg border border-gray-200 p-3 shadow-md hover:shadow-lg transition-all duration-200">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center">
+                                <div id="node-status-${node.id}" class="w-2 h-2 ${node.usage >= 80 ? 'bg-red-500' : 'bg-green-500'} rounded-full mr-2"></div>
+                                <h3 class="font-medium text-gray-900 text-sm">${node.name}</h3>
+                            </div>
+                            <span class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-geist-mono text-gray-500">NODE ${node.id}</span>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-gray-500">Thread Usage</span>
+                                <span id="node-usage-value-${node.id}" class="font-geist-mono">${node.usage.toFixed(1)}%</span>
+                            </div>
+                            <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div id="node-usage-bar-${node.id}" class="usage-bar h-full ${usageGradient} rounded-full" style="width: ${node.usage}%;"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex justify-between">
+                            <div>
+                                <div class="text-xs text-gray-500 mb-0.5">Active Threads</div>
+                                <div class="text-lg font-medium">${node.threads}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-xs text-gray-500 mb-0.5">Pending Tasks</div>
+                                <div id="node-pending-${node.id}" class="text-lg font-medium">${node.pending}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateNodeCards() {
+            nodes.forEach(node => {
+                const usageBar = document.getElementById(`node-usage-bar-${node.id}`);
+                const usageValue = document.getElementById(`node-usage-value-${node.id}`);
+                const statusIndicator = document.getElementById(`node-status-${node.id}`);
+                const pendingTasks = document.getElementById(`node-pending-${node.id}`);
+
+                if (usageBar && usageValue && statusIndicator && pendingTasks) {
+                    const usageGradient = getUsageGradient(node.usage);
+
+                    usageValue.textContent = `${node.usage.toFixed(1)}%`;
+                    pendingTasks.textContent = node.pending;
+
+                    if (node.usage >= 80) {
+                        statusIndicator.classList.remove('bg-green-500');
+                        statusIndicator.classList.add('bg-red-500');
+                    } else {
+                        statusIndicator.classList.remove('bg-red-500');
+                        statusIndicator.classList.add('bg-green-500');
+                    }
+
+                    usageBar.classList.remove('gradient-green', 'gradient-yellow', 'gradient-red');
+                    usageBar.classList.add(usageGradient);
+
+                    setTimeout(() => {
+                        usageBar.style.width = `${node.usage}%`;
+                    }, 10);
+                }
+            });
+        }
+
+        async function updateNodeData() {
+            try {
+                const now = new Date();
+                const timeLabel = now.getHours().toString().padStart(2, '0') + ':' +
+                    now.getMinutes().toString().padStart(2, '0') + ':' +
+                    now.getSeconds().toString().padStart(2, '0');
+
+                historyData.labels.push(timeLabel);
+
+                if (historyData.labels.length > 10) {
+                    historyData.labels.shift();
+                    historyData.usages.forEach(arr => arr.shift());
+                    historyData.tasks.forEach(arr => arr.shift());
+                }
+
+                nodes.forEach((node, index) => {
+                    historyData.usages[index].push(node.usage);
+                    historyData.tasks[index].push(node.pending);
+                })
+
+                refreshNodes()
+                    .then(() => {
+                        updateNodeCards();
+                        updateCharts();
+                    })
+                
+            } catch (error) {
+                console.error("Error updating node data:", error);
+                showError("Failed to update node data. Please check the console for details.");
+            }
+        }
+        const throttledUpdateNodeData = throttle(updateNodeData, 200);
+
+        function simulateRealTimeUpdates() {
+            initializeNodeCards();
+            updateNodeData();
+        }
+
+        let usageChart, tasksChart;
+
+        function initCharts() {
+            const usageCtx = document.getElementById('usageChart').getContext('2d');
+            const tasksCtx = document.getElementById('tasksChart').getContext('2d');
+
+            const colors = [
+                'rgba(59, 130, 246, 0.7)',
+                'rgba(220, 38, 38, 0.7)',
+                'rgba(16, 185, 129, 0.7)',
+                'rgba(245, 158, 11, 0.7)',
+                'rgba(124, 58, 237, 0.7)',
+                'rgba(236, 72, 153, 0.7)'
+            ];
+
+            usageChart = new Chart(usageCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: nodes.map((node, i) => ({
+                        label: node.name,
+                        data: [],
+                        borderColor: colors[i],
+                        backgroundColor: colors[i].replace('0.7', '0.1'),
+                        tension: 0.3,
+                        borderWidth: 2
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 800
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Node Usage Trend (%)'
+                        },
+                        legend: {
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                stepSize: 20
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+
+            tasksChart = new Chart(tasksCtx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: nodes.map((node, i) => ({
+                        label: node.name,
+                        data: [],
+                        backgroundColor: colors[i],
+                        borderWidth: 1
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 500
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Pending Tasks'
+                        },
+                        legend: {
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateCharts() {
+            usageChart.data.labels = [...historyData.labels];
+            tasksChart.data.labels = [...historyData.labels];
+
+            for (let i = 0; i < nodes.length; i++) {
+                usageChart.data.datasets[i].data = [...historyData.usages[i]];
+                tasksChart.data.datasets[i].data = [...historyData.tasks[i]];
+            }
+
+            usageChart.update();
+            tasksChart.update();
+        }
+
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
+        const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
+
+        function setInitialTheme() {
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const storedTheme = localStorage.getItem('color-theme');
+
+            if (storedTheme === 'dark' || (storedTheme === null && prefersDark)) {
+                document.body.classList.add('dark');
+                themeToggleLightIcon.classList.remove('hidden');
+            } else {
+                themeToggleDarkIcon.classList.remove('hidden');
+            }
+
+            document.documentElement.style.visibility = 'visible';
+        }
+
+        function setupThemeListener() {
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+                if (!localStorage.getItem('color-theme')) {
+                    if (e.matches) {
+                        document.body.classList.add('dark');
+                        themeToggleLightIcon.classList.remove('hidden');
+                        themeToggleDarkIcon.classList.add('hidden');
+                    } else {
+                        document.body.classList.remove('dark');
+                        themeToggleDarkIcon.classList.remove('hidden');
+                        themeToggleLightIcon.classList.add('hidden');
+                    }
+                }
+            });
+        }
+
+        themeToggleBtn.addEventListener('click', () => {
+            if (document.body.classList.contains('dark')) {
+                document.body.classList.remove('dark');
+                localStorage.setItem('color-theme', 'light');
+                themeToggleDarkIcon.classList.remove('hidden');
+                themeToggleLightIcon.classList.add('hidden');
+            } else {
+                document.body.classList.add('dark');
+                localStorage.setItem('color-theme', 'dark');
+                themeToggleLightIcon.classList.remove('hidden');
+                themeToggleDarkIcon.classList.add('hidden');
+            }
+        });
+
+        function showLoading() {
+            document.getElementById('loading-indicator').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-indicator').classList.add('hidden');
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.querySelector('span').textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('error-message').classList.add('hidden');
+        }
+
+        async function initApp() {
+            
+            refreshNodes().then(() => {
+                setInitialTheme();
+                setupThemeListener();
+                showLoading();
+                initCharts();
+                
+                historyData = {
+                    labels: [],
+                    usages: Array(nodes.length).fill().map(() => []),
+                    tasks: Array(nodes.length).fill().map(() => [])
+                }
+                
+                setTimeout(() => {
+                    simulateRealTimeUpdates();
+                    hideLoading();
+                    setInterval(throttledUpdateNodeData, 500);
+                }, 1000);
+            })
+
+        }
+
+        initApp();
+    </script>
+</body>
+
+</html>
