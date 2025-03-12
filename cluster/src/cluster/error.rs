@@ -1,8 +1,8 @@
 use crate::adb::error::Error as AdbError;
 use thiserror::Error as ErrorTrait;
 use tokio::sync::{mpsc, watch};
-use crate::soul_knight::FrameBuffer;
-use crate::soul_knight::model::NodeSignal;
+use crate::cluster::FrameBuffer;
+use crate::cluster::model::NodeSignal;
 
 #[derive(Debug, ErrorTrait)]
 pub enum Error {

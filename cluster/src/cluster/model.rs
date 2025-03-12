@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use crate::adb::event::{Key, KeyValue};
+use crate::utils::Position;
 
 #[derive(Debug, Clone)]
 pub enum NodeWatcherSignal {
@@ -10,15 +12,23 @@ pub enum NodeWatcherSignal {
     Error { node_name: &'static str, err: String },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum NodeSignal {
-    Action(Action),
+    Action(SoulKnightAction),
+    RawAction(RawAction),
     Close,
     Kill
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
+pub enum RawAction {
+    Click { pos: Position<u32> },
+    Key { key: Key, val: KeyValue },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoulKnightAction {
     sn: u64,
     direction: Option<f64>,
     attack: bool,
@@ -26,9 +36,9 @@ pub struct Action {
     weapon: bool,
 }
 
-impl Action {
+impl SoulKnightAction {
     pub fn new(sn: u64, dir: Option<f64>, attack: bool, skill: bool, weapon: bool) -> Self {
-        Action {
+        SoulKnightAction {
             sn,
             skill,
             attack,

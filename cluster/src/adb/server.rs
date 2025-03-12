@@ -1,7 +1,7 @@
 use std::net::SocketAddrV4;
 use adb_client::{ADBServer, DeviceShort};
-use super::ServerConfig;
-use super::{Error, ServerError};
+use crate::cluster::ServerConfig;
+use crate::cluster::{Error, ServerError};
 
 pub struct Server {
     name: &'static str,

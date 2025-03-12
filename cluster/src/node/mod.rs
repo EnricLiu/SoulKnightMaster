@@ -11,14 +11,14 @@ use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use crate::adb::Device;
 use crate::adb::pool::DeviceConnPool;
-use crate::soul_knight::Action;
-use crate::soul_knight::{FrameBuffer, NodeError};
-use crate::soul_knight::NodeConfig;
+use crate::cluster::SoulKnightAction;
+use crate::cluster::{FrameBuffer, NodeError};
+use crate::cluster::NodeConfig;
 use crate::utils::{log, perf_log, perf_timer, Position};
 
 use crate::adb::event::KeyValue;
 use crate::node::status::{AtomicNodeStatus, NodeStatusCode};
-use crate::soul_knight::{NodeSignal, NodeWatcherSignal};
+use crate::cluster::{NodeSignal, NodeWatcherSignal};
 
 pub struct NodeState {
     direction:  AtomicU64,
@@ -184,7 +184,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
         let schedule = tokio::spawn(async move {
             
             let action
-                = Arc::new(RwLock::new(Action::new(0, None, false, false, false)));
+                = Arc::new(RwLock::new(SoulKnightAction::new(0, None, false, false, false)));
             let stop_flag = Arc::new(AtomicBool::new(false));
             
             let _device = node.clone();
@@ -424,7 +424,7 @@ async fn test() -> Result<(), NodeError> {
     
     for i in 0..100 {
         // let action = Action::new(i, Some(0.0), true, true, true);
-        let action = Action::new(i, None, false, false, true);
+        let action = SoulKnightAction::new(i, None, false, false, true);
         node.act(NodeSignal::Action(action)).await.expect("我超");
         interval.tick().await;
         println!("act!!!!!")

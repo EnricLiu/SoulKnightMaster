@@ -1,7 +1,7 @@
 mod adb;
 mod utils;
 mod server;
-mod soul_knight;
+mod cluster;
 pub mod node;
 
 use dashmap::DashMap;
@@ -10,7 +10,7 @@ use std::sync::{Arc, LazyLock};
 use adb_client::{ADBDeviceExt, ADBServer};
 use tokio::sync::watch;
 use crate::node::Node;
-use crate::soul_knight::{Cluster, NodeConfig, NodeError, NodeWatcherSignal, ServerConfig};
+use crate::cluster::{Cluster, NodeConfig, NodeError, NodeWatcherSignal, ServerConfig};
 
 static ADB_SERVER_DEFAULT_IP: LazyLock<SocketAddrV4> = LazyLock::new(|| {
     SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5037)
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box::<dyn std::error::Error>> {
 async fn test() -> Result<(), NodeError> {
     use serde_json;
     use chrono::Local;
-    use soul_knight::*;
+    use cluster::*;
 
     const FPS: f64 = 5.0;
     let sleep_duration = std::time::Duration::from_millis((1000.0 / FPS) as u64);
@@ -84,7 +84,7 @@ async fn test() -> Result<(), NodeError> {
     for i in 0..100 {
         interval.tick().await;
         // let action = Action::new(i, Some(i as f64 * pi / 4f64), true, true, true);
-        let action = Action::new(i, None, true, false, false);
+        let action = SoulKnightAction::new(i, None, true, false, false);
         // let action = Action::new(i, Some(i as f64 * pi / 4f64), false, false, false);
         node.act(NodeSignal::Action(action)).await.expect("???");
         

@@ -1,11 +1,10 @@
-pub mod config;
-pub mod cluster;
-pub mod error;
-pub mod server;
+mod config;
+mod cluster;
+mod error;
 mod health;
 mod model;
 
 pub use config::{NodeConfig, ServerConfig};
 pub use cluster::Cluster;
 pub use error::{Error, NodeError, ServerError};
-pub use model::{Action, NodeSignal, NodeWatcherSignal, FrameBuffer};
+pub use model::{SoulKnightAction, RawAction, FrameBuffer, NodeSignal, NodeWatcherSignal};

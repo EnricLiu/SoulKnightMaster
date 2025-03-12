@@ -1,12 +1,13 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use dashmap::DashMap;
-use crate::soul_knight::model::NodeSignal;
-use super::server::Server;
+use crate::cluster::model::NodeSignal;
+use crate::adb::server::Server;
 use super::config::{NodeConfig, ServerConfig};
 use super::error::{Error, ServerError};
 use crate::node::{Node, NodeStatus};
-use crate::soul_knight::{Action, FrameBuffer, NodeError};
+use crate::cluster::{SoulKnightAction, FrameBuffer, NodeError};
+use crate::utils::Position;
 
 pub struct Cluster {
     // name -> Node
@@ -48,9 +49,9 @@ impl Cluster {
         ret
     }
     
-    pub async fn act_by_name(&self, name: &str, action: Action) -> Result<(), Error> {
+    pub async fn act_by_name(&self, name: &str, action: NodeSignal) -> Result<(), Error> {
         if let Some(node) = self.nodes.get(name) {
-            match node.value().act(NodeSignal::Action(action)).await {
+            match node.value().act(action).await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(Error::NodeError(e))
             }

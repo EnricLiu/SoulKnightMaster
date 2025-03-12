@@ -1,8 +1,9 @@
 use std::hash::Hash;
 use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 
 // from /system/usr/keylayout/qwerty.kl
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u32)]
 pub enum Key {
     Back = 1,
@@ -108,7 +109,7 @@ pub enum Key {
     Stem3 = 584,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u32)]
 pub enum KeyValue {
     Up = 0,

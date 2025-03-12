@@ -48,7 +48,7 @@ impl NodeConfigKeyMap {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeConfig {
-    name: &'static str, 
+    name: &'static str,
     iden: &'static str,
     server:     &'static str,
     ev_device:  &'static str,
