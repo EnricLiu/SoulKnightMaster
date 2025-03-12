@@ -65,7 +65,7 @@ impl Cluster {
         let server_name = config.server();
         let server_addr
             = if let Some(mut server) = self.servers.get_mut(server_name) {
-                let _ = server.check_node_by_iden(&iden)?;
+                let _ = server.connect_node_by_addr(&iden)?;
                 Ok(server.addr())
             } else {
                 Err(ServerError::ServerNotFound(server_name.to_string()))

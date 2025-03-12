@@ -28,6 +28,15 @@ impl Server {
         }
     }
     
+    pub fn connect_node_by_addr(&mut self, iden: &str) -> Result<(), ServerError> {
+        if let Err(e) = self.check_node_by_iden(iden) {
+            if let ServerError::DeviceNotConnected(_) = e {
+                self.server.connect_device(iden.parse().unwrap())?;
+            }
+        }
+        Ok(())
+    }
+    
     pub fn check_node_by_iden(&mut self, iden: &str) -> Result<(), ServerError> {
         let nb_devices = self.server
             .devices()?

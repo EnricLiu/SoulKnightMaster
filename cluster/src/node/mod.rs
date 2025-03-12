@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use crate::adb::Device;
 use crate::adb::pool::DeviceConnPool;
-use crate::cluster::SoulKnightAction;
+use crate::cluster::{RawAction, SoulKnightAction};
 use crate::cluster::{FrameBuffer, NodeError};
 use crate::cluster::NodeConfig;
 use crate::utils::{log, perf_log, perf_timer, Position};
@@ -254,9 +254,11 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                 log(&format!("[{name}] Action task finished."));
                 Ok(())
             });
-            
+
+            let _device = node.clone();
             let _action = action.clone();
             let _status = status.clone();
+            let _res_tx = res_tx.clone();
             let _stop_flag = stop_flag.clone();
             let _recv_task_ = tokio::spawn(async move {
                 let mut _act_rx = act_rx.try_lock();
@@ -271,6 +273,22 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                             let mut __action = _action.write().await;
                             *__action = action;
                         },
+                        NodeSignal::RawAction(action) => {
+                            let __device = _device.clone();
+                            let __res_tx = _res_tx.clone();
+                            tokio::spawn(async move {
+                                match action {
+                                    RawAction::Click { pos} => {
+                                        let res = __device.tap(pos).await
+                                            .map_err(|err| NodeError::ActionFailed { name, action: "click", err });
+                                        send_if_err(res, &__res_tx);
+                                    },
+                                    RawAction::Key { key, val } => {
+                                        todo!();
+                                    }
+                                }
+                            });
+                        }
                         NodeSignal::Close => {
                             // _stop_flag.store(true, Ordering::SeqCst);
                             break;

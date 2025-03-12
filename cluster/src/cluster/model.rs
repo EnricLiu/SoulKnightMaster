@@ -22,6 +22,7 @@ pub enum NodeSignal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum RawAction {
     Click { pos: Position<u32> },
     Key { key: Key, val: KeyValue },

@@ -17,7 +17,7 @@ use axum::{
 use axum::body::Bytes;
 use axum::http::HeaderMap;
 use axum::extract::Query;
-use axum::response::Response;
+use axum::response::{Html, Response};
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::{FrameBuffer, NodeConfig};
@@ -38,6 +38,8 @@ static TEST_PNG: LazyLock<FrameBuffer> = LazyLock::new(|| {
 
 pub fn route() -> Router {
     Router::new()
+        .route("/", get(get_index))
+        
         .route("/fb", get(get_fb))
         .route("/action", post(post_action))
         
@@ -49,6 +51,11 @@ pub fn route() -> Router {
         .route("/schedule_all", get(schedule_all))
         .route("/deschedule", get(deschedule))
         .route("/deschedule_all", get(deschedule_all))
+}
+
+async fn get_index() -> Response {
+    let content = tokio::fs::read_to_string("res/index.html").await;
+    Html::from(content.unwrap()).into_response()
 }
 
 async fn get_fb(
