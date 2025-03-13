@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import math
 
 
 class Action:
@@ -20,9 +21,9 @@ class Action:
             raise ValueError("raw_action must be a 1-D array with shape (4,)")
         raw_action = raw_action.tolist()
         return Action(
-            angle  = raw_action[1] if raw_action[0] > 0.5 else None,
-            attack = raw_action[2] > 0.5,
-            skill  = raw_action[3] > 0.5,
+            angle  = (math.pi * (raw_action[1] - 160) / 128) if raw_action[0] == 1 else None,
+            attack = raw_action[2] == 1,
+            skill  = raw_action[3] == 1,
             weapon = False
         )
     
@@ -38,6 +39,9 @@ class Action:
     def json(self) -> str:
         ret = json.dumps(self.__dict__())
         return ret
+    
+    def __str__(self):
+        return self.json()
 
 
 if __name__ == "__main__":

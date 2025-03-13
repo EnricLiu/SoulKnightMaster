@@ -5,27 +5,27 @@
     "ckpts": {
         "game_over": {
             "image": "./configs/image_ckpts/game_over.png",
-            "threshold": 60
+            "threshold": 100
         },
         "choose_character": {
             "image": "./configs/image_ckpts/choose_character.png",
-            "threshold": 60
+            "threshold": 100
         },
         "character_ready": {
             "image": "./configs/image_ckpts/character_ready.png",
-            "threshold": 60
+            "threshold": 100
         },
         "character_started": {
             "image": "./configs/image_ckpts/character_started.png",
-            "threshold": 60
+            "threshold": 100
         },
         "choose_mode": {
             "image": "./configs/image_ckpts/choose_mode.png",
-            "threshold": 60
+            "threshold": 100
         },
         "portal": {
             "image": "./configs/image_ckpts/portal.png",
-            "threshold": 100
+            "threshold": 150
         }
     },
     "task_flow": {

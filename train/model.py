@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torchvision.models import EfficientNet_V2_S_Weights,efficientnet_v2_s
-
+from torch.nn.functional import one_hot
 
 class MainModel(nn.Module):
     def __init__(self, hidden_size=256, num_layers=1, train_label=[]):
@@ -65,3 +65,84 @@ class MainModel(nn.Module):
         # 激活当前分支
         for param in self.branches[label].parameters():
             param.requires_grad = True
+
+
+class BranchesModel(nn.Module):
+    def __init__(self, in_features=1280, hidden_size=256, num_layers=1, train_label=["move", "angle", "attack", "skill"]):
+        super(BranchesModel, self).__init__()
+        self.train_label = train_label
+        self.branches = nn.ModuleDict({
+            label: nn.ModuleDict({
+                'gru': nn.GRU(in_features, hidden_size, batch_first=True, num_layers=num_layers),
+                'classifier': nn.Sequential(
+                    nn.Linear(hidden_size, 1024),
+                    nn.BatchNorm1d(1024),
+                    nn.ReLU(),
+                    nn.Dropout(0.5),
+                    nn.Linear(1024, 512),
+                    nn.BatchNorm1d(512),
+                    nn.ReLU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(512, 1)
+                )
+            }) for label in ["move", "angle", "attack", "skill"]
+        })
+        
+    def forward(self, features):
+        batch_size, seq_len, feature_dim = features.shape
+        out_list = []
+        for idx, label in enumerate(self.train_label):
+            gru = self.branches[label]['gru']
+            classifier = self.branches[label]['classifier']
+            gru_out, _ = gru(features)  # [batch_size, seq_len, hidden_size]
+            # Reshape for classifier: [batch_size * seq_len, hidden_size]
+            gru_out = gru_out.reshape(batch_size * seq_len, -1)
+            out = classifier(gru_out)  # [batch_size * seq_len, 1]
+            # Reshape back: [batch_size, seq_len, 1]
+            out = out.view(batch_size, seq_len, 1)
+            # out_list[:, :, idx] = out.squeeze(-1)
+            out_list.append(out.squeeze(-1))
+            
+        # pred_action = torch.stack(out_list, dim=2)[:, -1, :] #[bs, 4]
+        move = (out_list[0][:,-1] > 0.5).to(torch.int)
+        out_list = [
+            out_list[0][:,-1] > 0.5,                 # move
+            ((out_list[1][:,-1] + 1) * 128) % 256,   # angle
+            out_list[2][:,-1] > 0.5,                 # attack
+            out_list[3][:,-1] > 0.5,                 # skill
+        ]
+        
+        out_list = list(map(lambda x: x.to(torch.long), out_list))
+        out_list = [
+            one_hot(out_list[0], 2),
+            one_hot(out_list[1], 256),
+            one_hot(out_list[2], 2),
+            one_hot(out_list[3], 2),
+        ]
+
+        pred_action = torch.cat(out_list, dim=1)
+        return pred_action
+    
+class ValueModel(nn.Module):
+    def __init__(self, input_size=1280, hidden_size=256, num_layers=1):
+        super(ValueModel, self).__init__()
+        self.value_net = nn.ModuleDict({
+            'gru': nn.GRU(input_size=1280, hidden_size=256, num_layers=1, batch_first=True),
+            'classifier': nn.Sequential(
+                nn.Linear(256, 1024),
+                nn.LayerNorm(1024),
+                nn.GELU(),
+                nn.Dropout(0.5),
+                nn.Linear(1024, 512),
+                nn.LayerNorm(512),
+                nn.GELU(),
+                nn.Dropout(0.3),
+                nn.Linear(512, 1)
+            )
+        })
+        
+    def forward(self, obs):
+        # print(obs.shape)
+        gru_out, _ = self.value_net['gru'](obs)                         # [bs, seq_len, hidden_size]
+        value = self.value_net['classifier'](gru_out)                   # [bs, 1]
+        return value
