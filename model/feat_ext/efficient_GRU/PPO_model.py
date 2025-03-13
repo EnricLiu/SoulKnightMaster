@@ -104,13 +104,18 @@ class GameEnv(gym.Env):
             region = pil_image.crop(coords)
             gray_region = region.convert('L')
             state[name] = np.sum(np.array(gray_region))
+        def get_mana_percent(value):
+            min_mana = 390000
+            max_mana = 510000
+            # 将值限制在区间内并计算百分比
+            return max(0, min(100, (value - min_mana) / (max_mana - min_mana) * 100))
 
         # 状态判断逻辑
         state["in_portal"] = self._check_portal_state(state)
         state["combat_state"] = state["self"] <= STATE_CONFIG["self_combat"]
         state["blood_level"] = self._quantize_value(state["blood"], STATE_CONFIG["thresholds"]["blood"])
         state["shield_level"] = self._quantize_value(state["Shield"], STATE_CONFIG["thresholds"]["shield"])
-        state["mana_level"] = self._quantize_value(state["mana"], STATE_CONFIG["thresholds"]["mana"])
+        state["mana_level"] = get_mana_percent(state["mana"])
 
         return state
 
@@ -137,14 +142,11 @@ class GameEnv(gym.Env):
         reward += shield_diff * (-1 if shield_diff < 0 else 2)
 
         # 蓝量变化
-        mana_diff = current_state["mana_level"] - self.prev_state["mana_level"]
-        if mana_diff < 0:
-            if self.prev_state["mana_level"] == 2 and current_state["mana_level"] == 1:
-                reward -= 1
-            elif self.prev_state["mana_level"] == 1 and current_state["mana_level"] == 0:
-                reward -= 20
-        elif mana_diff > 0:
-            reward += abs(mana_diff) * 5
+        mana_diff = current_state["mana"] - self.prev_state["mana"]
+        if mana_diff < 0:  # 蓝量减少
+            reward += mana_diff * 0.05 * (1 - current_state["mana_level"] / 100)
+        else:  # 蓝量增加
+            reward += mana_diff * 0.02 * (1 - current_state["mana_level"] / 100)
 
         # 状态转换奖励
         if not current_state["combat_state"] and self.prev_state["combat_state"]:
@@ -176,12 +178,12 @@ class GameEnv(gym.Env):
         return state["blood_level"] == 0  # 空血时结束
 
     # 以下需根据实际游戏接口实现
-    def _capture_game_screen(self) -> np.ndarray:#🐮🐮🐮🐮🐮
+    def _capture_game_screen(self) -> np.ndarray:
         """ 游戏截图实现（） """
 
         return np.random.randint(0, 255, (1280, 720, 3), dtype=np.uint8)
 
-    def _execute_action(self, action: int):#🐮🐮🐮🐮🐮
+    def _execute_action(self, action: int):
         """ 实际动作执行逻辑（） """
         print(f"Executing action: {action}")
 
