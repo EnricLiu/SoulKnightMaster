@@ -4,13 +4,13 @@ from torch import nn
 unlocked_map = np.array([[[2, 0, 1],
                 [1, 3, 0],
                 [0, 1, 2],
-                [0, 0, 0],
-                [0, 0, 0]],
+                [1, 0, 0],
+                [0, 0, 1]],
                 [[2, 0, 1],
                 [1, 3, 0],
                 [0, 1, 2],
-                [0, 0, 0],
-                [0, 0, 0]]])
+                [2, 0, 0],
+                [0, 0, 1]]])
 C, H, W = unlocked_map.shape
 full_map = np.zeros((2,5,5))
 full_map[:,:H, :W] = unlocked_map
