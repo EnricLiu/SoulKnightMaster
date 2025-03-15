@@ -3,10 +3,11 @@ import json
 from math import pi
 import numpy as np
 from PIL import Image
+from PIL.Image import Image as _Image
 
 from httb import Client as httb
-from action import Action
-from position import Position
+from utils import Action
+from utils import Position
 
 class Client:
     def __init__(self, node_name, ip="127.0.0.1", port="55555", timeout=1):
@@ -48,8 +49,6 @@ class Client:
 
 
 class AutoPilotClient(Client):
-    ckpts = ["choose_character", "character_start", "character_started", "choose_mode", "portal"]
-
     def __init__(self, node_name, config):
         super().__init__(node_name, config["ip"], config["port"])
 
@@ -57,9 +56,19 @@ class AutoPilotClient(Client):
         self.ckpts = {}
         self.load_ckpts(config["ckpts"])
 
-    def dhash(self, img: Image, resize=(32, 18)):
-        img = img.resize(resize, Image.Resampling.LANCZOS)
-        pixels = np.array(img.convert('L')) 
+    def dhash(self, img: _Image|np.ndarray, resize=(32, 18)):
+        if isinstance(img, np.ndarray):
+            if resize is None:
+                pixels = img.dot([0.2989, 0.5870, 0.1140]).astype(np.uint8)
+                print(pixels.shape)
+            else:
+                img = Image.fromarray(img)
+                
+        if isinstance(img, Image.Image):
+            if resize is not None:
+                img = img.resize(resize)
+            pixels = np.array(img.convert('L')) 
+        
         diff_h = pixels[:, 1:] > pixels[:, :-1]
         diff_v = pixels[1:, :] > pixels[:-1, :]
         hash_bits = np.concatenate([diff_h.flatten(), diff_v.flatten()]).astype(np.uint8)

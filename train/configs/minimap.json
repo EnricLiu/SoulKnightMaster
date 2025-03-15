@@ -1,0 +1,121 @@
+{
+    "root_path": "./configs/ckpts/minimap",
+
+    "region": {
+        "tl": { "x": 120, "y": 1060 },
+        "br": { "x": 320, "y": 1260 }
+    },
+
+    "room": {
+        "mask": "grid_mask.png",
+        "size": 24,
+        "interval": 38,
+        "first_pos": {
+            "x": 12,
+            "y": 12
+        }
+    },
+    "road": {
+        "color": [141, 141, 141],
+        "offset": 9,
+        "width": 6,
+        "length": 14
+    },
+
+    "ckpts": {
+        "home": {
+            "unveiled": {
+                "image": "home_unveiled.png",
+                "cost": 5,
+                "threshold": 10
+            }
+        },
+        "enemy": {
+            "veiled": {
+                "image": "enemy_veiled.png",
+                "cost": 15,
+                "threshold": 10
+            },
+            "unveiled_b": {
+                "image": "enemy_unveiled_b.png",
+                "cost": 5,
+                "threshold": 10
+            },
+            "unveiled": {
+                "image": "enemy_unveiled.png",
+                "cost": 5,
+                "threshold": 10
+            }
+        },
+        "jail": {
+            "veiled": {
+                "image": "jail_veiled.png",
+                "cost": 15,
+                "threshold": 10
+            },
+            "unveiled_b": {
+                "image": "jail_unveiled_b.png",
+                "cost": 5,
+                "threshold": 10
+            },
+            "unveiled": {
+                "image": "jail_unveiled.png",
+                "cost": 5,
+                "threshold": 10
+            }
+        },
+        "chest": {
+            "veiled": {
+                "image": "chest_veiled.png",
+                "cost": 5,
+                "threshold": 10
+            },
+            "unveiled": {
+                "image": "chest_unveiled.png",
+                "cost": 5,
+                "threshold": 10
+            }
+        },
+        "event": {
+            "veiled": {
+                "image": "event_veiled.png",
+                "cost": 5,
+                "threshold": 10
+            },
+            "unveiled": {
+                "image": "event_unveiled.png",
+                "cost": 5,
+                "threshold": 10
+            }
+        },
+        "boss": {
+            "veiled": {
+                "image": "boss_veiled.png",
+                "cost": 60,
+                "threshold": 10
+            },
+            "unveiled_b": {
+                "image": "boss_unveiled_b.png",
+                "cost": 5,
+                "threshold": 10
+            },
+            "unveiled": {
+                "image": "boss_unveiled.png",
+                "cost": 5,
+                "threshold": 10
+            }
+        },
+        "portal": {
+            "veiled": {
+                "image": "portal_veiled.png",
+                "cost": 5,
+                "threshold": 10
+            },
+            "unveiled": {
+                "image": "portal_unveiled.png",
+                "cost": 5,
+                "threshold": 10
+            }
+        }
+    }
+}
