@@ -7,9 +7,9 @@ from pathlib import Path
 import time
 
 from model import MainModel, BranchesModel, ValueModel
-from environment import SoulKnightEnv
+from env import SoulKnightEnv
 from client import Client
-from action import Action 
+from utils import Action
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -83,9 +83,10 @@ if __name__ == "__main__":
     import json
     
     print("Loading Config")
-    config = json.load(open("./configs/client.json"))
+    client_config = json.load(open("./configs/client.json"))
+    minimap_config = json.load(open("./configs/minimap.json"))
     print("Making Env")
-    env = make_vec_env(lambda: SoulKnightEnv("cuda", config), n_envs=1)
+    env = make_vec_env(lambda: SoulKnightEnv("cuda", client_config, minimap_config), n_envs=1)
     print("Making Model")
     try:
         start = round(time.time())
@@ -93,7 +94,7 @@ if __name__ == "__main__":
         print("Start Learning")
         model.learn(total_timesteps=1_000_000)
     except Exception as e:
-        print("我测: ", e)
+        raise e
     finally:
         train_duration = round(round(time.time()) - start)
         print("Model Saving")

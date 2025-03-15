@@ -1,6 +1,7 @@
 from pathlib import Path
 import math
 
+import cv2
 import numpy as np
 from PIL import Image
 import gymnasium as gym
@@ -10,10 +11,11 @@ import torch.nn as nn
 from torch import Tensor
 from torchvision import transforms
 
-from action import Action
+from utils import Action
 from model import MainModel
-from position import Position
+from utils import Position
 from client import AutoPilotClient
+from minimap import SoulKnightMinimap
 
 CKPT_PATH_COMBINE = Path("./pretrain/bn/1741430443-ln=skill-loss=8.477-e3.pth")
 STATE_CONFIG = {
@@ -49,11 +51,12 @@ if __name__ == "__main__":
         print(res.cpu().numpy().shape)
 
 class SoulKnightEnv(gym.Env):
-    def __init__(self, device, autopilot_config: dict):
+    def __init__(self, device, autopilot_config: dict, minimap_config: dict):
         super(SoulKnightEnv, self).__init__()
         
         self.device = device
         self.client = AutoPilotClient("SKM_16448", autopilot_config)
+        self.minimap = SoulKnightMinimap(minimap_config)
         self.feature_extractor = FeatureExtractor().to(self.device)
         self.feature_extractor.eval()
         
@@ -65,7 +68,6 @@ class SoulKnightEnv(gym.Env):
         )
         
         self.features = torch.zeros((1, 10, 1280), dtype=torch.float32).to("cpu")
-
         # is_move[0-1], move_angle[0-255], is_attack[0-1], is_skill[0-1]
         self.action_space = gym.spaces.MultiDiscrete([2, 256, 2, 2])
         self.running_timer = 0
@@ -85,7 +87,7 @@ class SoulKnightEnv(gym.Env):
         # 1. 获取原始游戏画面
         task_res = False
         task_res = self.client.try_task("restart", timeout=60, max_retry=1)
-        
+        self.minimap.reset()
         features, raw_frame = self.fetch_features()
         # 3. 初始化状态跟踪
         self.prev_state = self._extract_game_state(raw_frame)
@@ -96,12 +98,14 @@ class SoulKnightEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         """ 执行动作并返回环境反馈 """
         # 1. 执行游戏动作
-        self.client.sync_action(Action.from_raw(action))
+        action = Action.from_raw(action)
+        self.client.sync_action(action)
         # 2. 获取新状态
         features, new_frame = self.fetch_features()
+        self.minimap.parse(self.minimap.crop_minimap(new_frame))
         new_state = self._extract_game_state(new_frame)
         # 3. 计算奖励
-        reward = self._calculate_reward(new_state)
+        reward = self._calculate_reward(new_state, action)
         # select buff
         if self._check_portal_state(new_state):
             self.client.sync_click(Position(640, 640))
@@ -117,11 +121,10 @@ class SoulKnightEnv(gym.Env):
         self.show_reward()
         self.rewards = np.roll(self.rewards, 1, axis=0)
         self.rewards[-1] = reward
-        
-        
-        
+
         return features, reward, terminated, truncated, {}
     
+
     def fetch_features(self) -> tuple[np.ndarray, np.ndarray]:
         """fetch_fb and extract features, then update the feature dequeue
         
@@ -142,6 +145,7 @@ class SoulKnightEnv(gym.Env):
         with torch.no_grad():
             feature = self.feature_extractor(Tensor(processed_frame).unsqueeze(0).to(self.device))
         return feature, new_frame
+    
 
     def _preprocess_frame(self, raw_frame: np.ndarray) -> np.ndarray:
         """ 图像预处理流水线（关键修改点） """
@@ -152,6 +156,7 @@ class SoulKnightEnv(gym.Env):
         processed_frame = data_transform["train"](raw_frame)
 
         return processed_frame
+    
 
     def _extract_game_state(self, frame: np.ndarray) -> dict:
         """ 从原始帧提取游戏状态（用于奖励计算） """
@@ -163,28 +168,35 @@ class SoulKnightEnv(gym.Env):
             region = pil_image.crop(coords)
             gray_region = region.convert('L')
             state[name] = np.sum(np.array(gray_region))
+        def get_mana_percent(value):
+            min_mana = 390000
+            max_mana = 510000
+            # 将值限制在区间内并计算百分比
+            return max(0, min(100, (value - min_mana) / (max_mana - min_mana) * 100))
+
 
         # 状态判断逻辑
         state["in_portal"]      = self._check_portal_state(state)
         state["combat_state"]   = state["self"] <= STATE_CONFIG["thresholds"]["self_combat"]
         state["blood_level"]    = self._quantize_value(state["blood"],  STATE_CONFIG["thresholds"]["blood"])
         state["shield_level"]   = self._quantize_value(state["Shield"], STATE_CONFIG["thresholds"]["shield"])
-        state["mana_level"]     = self._quantize_value(state["mana"],   STATE_CONFIG["thresholds"]["mana"])
+        state["mana_level"]     = get_mana_percent(state["mana"])
 
         return state
 
-    def _calculate_reward(self, current_state: dict) -> float:
+    def _calculate_reward(self, current_state: dict, action: Action) -> float:
         """ 基于状态变化的奖励计算 """
         reward = 0.0
 
         # 传送门奖励（优先级最高）
         if current_state["in_portal"] and not self.prev_state["in_portal"]:
-            return 5.0
+            self.minimap.reset()
+            return 500
 
         # 血量变化
         blood_diff = current_state["blood_level"] - self.prev_state["blood_level"]
         if current_state["blood_level"] == 0:
-            reward -= 100
+            reward -= 2000
         elif blood_diff < 0:
             if self.prev_state["blood_level"] == 2 and current_state["blood_level"] == 1:
                 reward -= 20
@@ -197,31 +209,40 @@ class SoulKnightEnv(gym.Env):
 
         # 蓝量变化
         mana_diff = current_state["mana_level"] - self.prev_state["mana_level"]
-        if mana_diff < 0:
-            if self.prev_state["mana_level"] == 2 and current_state["mana_level"] == 1:
-                reward -= 1
-            elif self.prev_state["mana_level"] == 1 and current_state["mana_level"] == 0:
-                reward -= 20
-        elif mana_diff > 0:
-            reward += abs(mana_diff) * 5
-
+        if mana_diff < 0:  # 蓝量减少
+            reward += mana_diff * 2 * (1 - current_state["mana_level"] / 100)
+        else:  # 蓝量增加
+            reward += mana_diff * 0.8 * (1 - current_state["mana_level"] / 100)
+        
         # 状态转换奖励
         if not current_state["combat_state"] and self.prev_state["combat_state"]:
-            reward += 1
+            reward += 10
             self.running_duration = 0
             
         if current_state["combat_state"] and not self.prev_state["combat_state"]:
-            reward += 0.8
+            reward += 50
             self.running_duration = 0
             
-        elif not current_state["combat_state"]:
-            reward -= 0.0001 * math.sqrt(self.running_duration)
+        if not current_state["combat_state"]:
+            # minimap direction
+            target_dir = self.minimap.navigate()
+            # img = self.minimap._render()
+            # cv2.imshow("minimap", img)
+            # key = cv2.waitKey(50)
+            if self.steps % 128 == 0: print("GOOGLE_MAP: ", target_dir)
+            
+            if target_dir is not None and action._angle is not None:
+                action_angle = action._angle + math.pi/4
+                reward += 0.5 - ((target_dir - action_angle + math.pi) % (2 * math.pi) - math.pi) ** 2 / 10
+            
+            # idle
+            reward -= 0.2 * math.sqrt(self.running_duration)
             self.running_duration += 1
-            # if self.running_duration >= 100:  # 假设每步0.125秒，1.25秒=100步🐮🐮🐮🐮🐮
+            # if self.running_duration >= 100:  # 假设每步0.125秒，1.25秒=100步
             #     reward -= 0.01
             #     self.running_duration = 0
 
-        return reward
+        return reward * 0.01
 
     def _quantize_value(self, value: float, thresholds: list) -> int:
         """ 将连续值量化为离散等级 """
