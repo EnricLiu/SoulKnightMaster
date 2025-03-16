@@ -99,12 +99,12 @@ class ActorModel(nn.Module):
             out_list.append(out.squeeze(-1))
 
         # pred_action = torch.stack(out_list, dim=2)[:, -1, :] #[bs, 4]
-        move = (out_list[0][:, -1] > 0.5).to(torch.int)
+        move = (out_list[0] > 0.5).to(torch.int)
         out_list = [
-            out_list[0][:, -1] > 0.5,  # move
-            ((out_list[1][:, -1] + 1) * 128) % 256,  # angle
-            out_list[2][:, -1] > 0.5,  # attack
-            out_list[3][:, -1] > 0.5,  # skill
+            out_list[0] > 0.5,  # move
+            ((out_list[1] + 1) * 128) % 256,  # angle
+            out_list[2] > 0.5,  # attack
+            out_list[3] > 0.5,  # skill
         ]
 
         out_list = list(map(lambda x: x.to(torch.long), out_list))
