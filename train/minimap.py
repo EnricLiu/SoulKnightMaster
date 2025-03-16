@@ -6,6 +6,8 @@ import numpy as np
 from PIL import Image
 from PIL.Image import Image as _Image
 
+import torch
+
 from utils import Position, dhash, dhash_batch
     
 class SoulKnightMinimap:
@@ -63,13 +65,34 @@ class SoulKnightMinimap:
     def reset(self):
         self.graph = SoulKnightGraph(0, self.ckpts["room_types"])
     
-    def parse(self, mini_map: np.ndarray):
-        rooms, mask = self._extract_room(mini_map)
-        roads = self._extract_road(mini_map, mask)
+    def update(self, mini_map: np.ndarray):
+        rooms, roads, _ = self.parse(mini_map)
         res, info = self.graph.update(rooms, roads)
         if not res and info == "Center Not Detected":
             self.reset()
         return res
+    
+    def parse(self, mini_map: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """parse the given minimap to rooms and roads
+
+        Args:
+            mini_map (np.ndarray): (200, 200, 3)
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: rooms, roads, (5, 5)
+        """
+        rooms, mask = self._extract_room(mini_map)
+        roads = self._extract_road(mini_map, mask)
+        
+        if rooms is None: 
+            rooms = np.zeros((5,5), dtype=np.uint8)
+        if roads is None: 
+            roads = np.zeros((5,5), dtype=np.uint8)
+
+        current_pos = np.zeros((5,5), dtype=np.uint8)
+        current_pos[2,2] = 1
+            
+        return rooms, roads, current_pos
     
     def navigate(self) -> float:
         for t in ["portal", "boss"]:
@@ -474,7 +497,6 @@ class SoulKnightGraph:
 if __name__ == "__main__":
     import json, time
     import cv2
-    from utils import SoulKnightGraph
     from client import Client
     
     config = json.load(open("./configs/minimap.json"))
@@ -495,7 +517,12 @@ if __name__ == "__main__":
         frame = frame[mini_map_region[1]:mini_map_region[3], mini_map_region[0]:mini_map_region[2]]
         try:
             print("GoogleMap: ", minimap.navigate())
-            dir = minimap.parse(frame)
+            dir = minimap.update(frame)
+            print(f"current at: {minimap.graph.curr_center}")
+            print("node:")
+            print(minimap.graph.node_graph)
+            print("access:")
+            print(minimap.graph.access_graph)
             img = minimap.render()
             if img is not None:
                 cv2.imshow("minimap", np.array(img))

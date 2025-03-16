@@ -1,76 +1,100 @@
 import numpy as np
 import torch
 from torch import nn
-unlocked_map = np.array([[[2, 0, 1],
-                [1, 3, 0],
-                [0, 1, 2],
-                [1, 0, 0],
-                [0, 0, 1]],
-                [[2, 0, 1],
-                [1, 3, 0],
-                [0, 1, 2],
-                [2, 0, 0],
-                [0, 0, 1]]])
-C, H, W = unlocked_map.shape
-full_map = np.zeros((2,5,5))
-full_map[:,:H, :W] = unlocked_map
-# print(full_map)
-stats_dict = {"map_grid": torch.tensor(full_map).unsqueeze(0),
-                "position": torch.tensor([0, 1]).unsqueeze(0),
-                "hp_mp_shield": torch.tensor([4, 100, 6]).unsqueeze(0)}
+from torchvision.models import EfficientNet_B0_Weights, efficientnet_b0
+from minimap import SoulKnightMinimap
+from torch.nn.functional import avg_pool2d
 
 
-class StatsBranch(nn.Module):
-    def __init__(self):
+class ValueModel(nn.Module):
+    def __init__(self, minimap_config, gru_hs=128, hardcode_hs=128, minimap_out_dim=64, health_out_dim=32, num_layers=2):
         super().__init__()
 
+        self.minimap = SoulKnightMinimap(minimap_config)
+        
+        self.effi_net = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
+        in_features = self.effi_net.classifier[1].in_features # 1280
+        self.effi_net.classifier = nn.Identity()  # Remove original classifier
+        self.gru = nn.GRU(in_features, gru_hs, batch_first=True, num_layers=num_layers)
+        
         # --- 小地图处理子分支 ---
         self.map_cnn = nn.Sequential(
-            nn.Conv2d(2, 16, kernel_size=3, padding=1),  # 输入 (1,5,5)
+            nn.Conv2d(3, 16, kernel_size=2, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2),  # 输出 (16,2,2)
-            nn.Conv2d(16, 32, kernel_size=3),  # 输出 (32,0,0) → 需调整padding
-            nn.AdaptiveAvgPool2d(1),  # 输出 (32,1,1)
+            # nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, kernel_size=2),
+            nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Linear(32, 64)
-        )
-
-        # --- 位置编码子分支 ---
-        self.pos_encoder = nn.Sequential(
-            nn.Linear(2, 16),
-            nn.ReLU()
+            nn.Linear(32, minimap_out_dim)
         )
 
         # --- 定值特征子分支 ---
-        self.stats_encoder = nn.Sequential(
-            nn.Linear(3, 16),  # HP, MP, Shield
+        self.health_encoder = nn.Sequential(
+            nn.Linear(3, health_out_dim),  # HP, MP, Shield
             nn.ReLU()
         )
 
         # --- 合并层 ---
-        self.combined = nn.Sequential(
-            nn.Linear(64 + 16 + 16, 128),
-            nn.LayerNorm(128),
+        self.hardcoded_head = nn.Sequential(
+            nn.Linear(minimap_out_dim + health_out_dim, 128),
+            nn.LayerNorm(hardcode_hs),
             nn.ReLU()
         )
+        
+        self.classifier = \
+            nn.Sequential(
+                nn.Linear(gru_hs + hardcode_hs, 512),
+                nn.BatchNorm1d(512),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(512, 64),
+                nn.BatchNorm1d(64),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(64, 1)
+            )
 
-    def forward(self, stats_dict: dict) -> torch.Tensor:
+    def forward(self, x) -> torch.Tensor:
         # 输入字典包含：map_grid, position, hp_mp_shield
         # map_grid: (B, 1, 5, 5)
         # position: (B, 4) → [sin(x), cos(x), sin(y), cos(y)]
         # hp_mp_shield: (B, 3)
+        frame, minimap, health = x # frame: (B, 10, 3, 90, 160), minimap: (B, 2, 5, 5), health: (B, 3)
+        print(frame,  minimap, health)
+        bs, seq_len, C, H, W = frame.shape
+        frame = frame.view(bs * seq_len, C, H, W)
+        frame_features = self.effi_net(frame)
+        frame_features = frame_features.view(bs, seq_len, -1)
+        frame_features, _ = self.gru(frame_features)
+        frame_features = frame_features[:, -1, :]
+        
+        graph_features = self.map_cnn(minimap)
+        health_features = self.health_encoder(health)
+        hardcoded_features = self.hardcoded_head(torch.cat([graph_features, health_features], dim=1))
+        
+        features = torch.cat([frame_features, hardcoded_features], dim=1)
+        print(features.shape) # [1, 256]
+        out = self.classifier(features)
+        
+        return out
+        
 
-        # 处理小地图
-        map_features = self.map_cnn(stats_dict["map_grid"])
-
-        # 处理位置
-        pos_features = self.pos_encoder(stats_dict["position"])
-
-        # 处理定值特征
-        stats_features = self.stats_encoder(stats_dict["hp_mp_shield"])
-
-        # 合并所有特征
-        combined = torch.cat([map_features, pos_features, stats_features], dim=1)
-        return self.combined(combined)
-
-
+if __name__ == "__main__":
+    import json
+    H, W = (5, 5)
+    MINIMAP_CFG = json.load(open("./configs/minimap.json"))
+    curr_pos = (1,0)
+    pos_input = np.zeros((1, 1, H, W), dtype=np.float32)
+    pos_input[:, :, curr_pos[0], curr_pos[1]] = 1
+    
+    curr_graph = np.random.randint(0, 15, (1, 2, 3, 4)).astype(np.uint8)
+    graph_input = np.zeros((1, curr_graph.shape[1], H, W), dtype=np.float32)
+    graph_input[:, :, :curr_graph.shape[2], :curr_graph.shape[3]] = curr_graph
+    
+    map_input = np.concatenate([pos_input, graph_input], axis=1)
+    frame_input = torch.zeros((2, 10, 3, 90, 160))
+    map_input = torch.zeros((2, 3, 5, 5))
+    health_input = torch.zeros((2, 3))
+    input = (frame_input, map_input, health_input)
+    model = ValueModel(MINIMAP_CFG)
+    print(model(input))

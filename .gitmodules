@@ -1,0 +1,3 @@
+[submodule "cluster/adb_client"]
+	path = cluster/adb_client
+	url = https://github.com/EnricLiu/adb_client.git
