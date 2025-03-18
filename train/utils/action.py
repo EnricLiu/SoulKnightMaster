@@ -1,6 +1,7 @@
 import numpy as np
 import json
 import math
+from math import pi as PI
 
 
 class Action:
@@ -10,10 +11,22 @@ class Action:
         Action.SN += 1
         
         self._sn     = Action.SN
-        self._angle  = angle
+        self._angle  = (angle + PI) % (2 * PI) - PI if angle is not None else None
         self._attack = attack
         self._skill  = skill
         self._weapon = weapon
+        
+    def from_onehot(raw_action: np.ndarray) -> 'Action':
+        raw_action = raw_action.reshape((4,))
+        if raw_action.shape != (4,):
+            raise ValueError("raw_action must be a 1-D array with shape (4,)")
+        raw_action = raw_action.tolist()
+        return Action(
+            angle  = (math.pi * (raw_action[1] - 128) / 128) if raw_action[0] == 1 else None,
+            attack = raw_action[2] == 1,
+            skill  = raw_action[3] == 1,
+            weapon = False
+        )
         
     def from_raw(raw_action: np.ndarray) -> 'Action':
         raw_action = raw_action.reshape((4,))
@@ -21,9 +34,9 @@ class Action:
             raise ValueError("raw_action must be a 1-D array with shape (4,)")
         raw_action = raw_action.tolist()
         return Action(
-            angle  = (math.pi * (raw_action[1] - 160) / 128) if raw_action[0] == 1 else None,
-            attack = raw_action[2] == 1,
-            skill  = raw_action[3] == 1,
+            angle  = raw_action[1] if raw_action[0] > 0.5 else None,
+            attack = raw_action[2] > 0.5,
+            skill  = raw_action[3] > 0.5,
             weapon = False
         )
     

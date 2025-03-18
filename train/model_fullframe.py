@@ -5,7 +5,7 @@ from torch.nn.functional import one_hot
 
 
 class ActorModel(nn.Module):
-    def __init__(self, hidden_size=256, num_layers=1, hardcode_hs=128, minimap_out_dim=64, health_out_dim=32,
+    def __init__(self, gru_hs=256, gru_layers=1, hardcode_hs=128, minimap_out_dim=64, health_out_dim=16,
                  train_label=["move", "angle", "attack", "skill"]):
         print("[ActorInit] initing parent...")
         super(ActorModel, self).__init__()
@@ -14,15 +14,22 @@ class ActorModel(nn.Module):
         print("[ActorInit] loading model...")
         weights = EfficientNet_V2_S_Weights.DEFAULT
         self.effi_net = efficientnet_v2_s(weights=weights)
-        in_features = self.effi_net.classifier[1].in_features  # 1280 for EfficientNet V2 S
-        print(f"Input size: {in_features}")
+        gru_in_dim = self.effi_net.classifier[1].in_features  # 1280 for EfficientNet V2 S
         self.effi_net.classifier = nn.Identity()  # Remove original classifier
+        
+        # frozen [0]-[5], [6: 0-9]
+        for i in range(6):
+            for param in self.effi_net.features[i].parameters():
+                param.requires_grad = False
+        for i in range(10):
+            for param in self.effi_net.features[6][i].parameters():
+                param.requires_grad = False
 
         self.branches = nn.ModuleDict({
             label: nn.ModuleDict({
-                'gru': nn.GRU(in_features, hidden_size, batch_first=True, num_layers=num_layers),
+                'gru': nn.GRU(gru_in_dim + hardcode_hs, gru_hs, batch_first=True, num_layers=gru_layers),
                 'classifier': nn.Sequential(
-                    nn.Linear(hidden_size + hardcode_hs, 1024),
+                    nn.Linear(gru_hs , 1024),
                     nn.BatchNorm1d(1024),
                     nn.ReLU(),
                     nn.Dropout(0.5),
@@ -53,89 +60,87 @@ class ActorModel(nn.Module):
 
         # --- 合并层 ---
         self.hardcoded_head = nn.Sequential(
-            nn.Linear(minimap_out_dim + health_out_dim, 128),
+            nn.Linear(minimap_out_dim + health_out_dim, hardcode_hs),
             nn.LayerNorm(hardcode_hs),
             nn.ReLU()
         )
-
         print("[ActorInit] Finish!")
 
     def forward(self, x):
-        x = x["frames"]
-        print("x shape: ", x.shape)
-
-        exit()
-        frame, minimap, health = x  # frame: (B, 10, 3, 90, 160), minimap: (B, 2, 5, 5), health: (B, 3)
+        frame, minimap, health = x          # frame: (B, 10, 3, 90, 160), minimap: (B, 10, 3, 5, 5), health: (B, 10, 3)
         bs, seq_len, C, H, W = frame.shape
         frame = frame.view(bs * seq_len, C, H, W)
-        batch_size, sequence_length, C, H, W = frame.shape
-        # Reshape for EfficientNet: [batch_size * sequence_length, C, H, W]
-        frame = frame.view(batch_size * sequence_length, C, H, W)
-        features = self.effi_net(frame)  # [batch_size * sequence_length, 1280]
-        # Reshape for GRU: [batch_size, sequence_length, 1280]
-        features = features.view(batch_size, sequence_length, -1)
-        out_list = []
-        # GRU processing
+        frame_features = self.effi_net(frame)                   # [bs * seq_len, gru_in_dim]
+        frame_features = frame_features.view(bs, seq_len, -1)   # [bs,  seq_len, gru_in_dim]
+        
+        bs, seq_len, C, H, W = minimap.shape
+        minimap = minimap.view(bs * seq_len, C, H, W)           # [bs * seq_len, 3, 5, 5]
+        # minimap = minimap[:,-1,:,:,:]                           # [bs, 3, 5, 5]
+        
+        bs, seq_len, dim = health.shape
+        health = health.view(bs * seq_len, dim)                 # [bs * seq_len, 3]
+        # health = health[:,-1,:]                                 # [bs, 3]
+        
+        actions = []
         for idx, label in enumerate(self.train_label):
-            gru = self.branches[label]['gru']
-            classifier = self.branches[label]['classifier']
-            gru_out, _ = gru(features)  # [batch_size, sequence_length, hidden_size]
-            print(f"GRU output shape: {gru_out.shape}")
-            # Reshape for classifier: [batch_size * sequence_length, hidden_size]
-            # gru_out = gru_out.reshape(batch_size * sequence_length, -1)
-            # actornet与valuenet出现差异，原actornet是将十个帧的输出直接reshape，在valuenet中则是取最后一个帧的输出，先更改actornet为valuenet一致的
-            gru_out = gru_out[:, -1, :]
-            print(f"GRU output shape: {gru_out.shape}")
-            exit()
-            graph_features = self.map_cnn(minimap)
-            health_features = self.health_encoder(health)
+            graph_features = self.map_cnn(minimap)                      # [bs * seq_len, minimap_out_dim]
+            graph_features = graph_features.view(bs, seq_len, -1)       # [bs, seq_len, minimap_out_dim]
+            health_features = self.health_encoder(health)               # [bs * seq_len, health_out_dim]
+            health_features = health_features.view(bs, seq_len, -1)     # [bs, seq_len, health_out_dim]
+            hardcoded_features = \
+                self.hardcoded_head(torch.cat([graph_features, health_features], dim=2))   # [bs, seq_len, hardcode_hs]
 
-            hardcoded_features = self.hardcoded_head(torch.cat([graph_features, health_features], dim=1))
-            features = torch.cat([gru_out, hardcoded_features], dim=1)
-            out = classifier(features)  # [batch_size * sequence_length, 1]
-            # Reshape back: [batch_size, sequence_length, 1]
-            out = out.view(batch_size, sequence_length, 1)
-            # out_list[:, :, idx] = out.squeeze(-1)
-            out_list.append(out.squeeze(-1))
+            gru_in = torch.cat([frame_features, hardcoded_features], dim=2)     # [bs, seq_len, gru_in_dim + hardcode_hs]
+            features, _ = self.branches[label]['gru'](gru_in)                   # [bs, seq_len, gru_hs]
+            action = self.branches[label]['classifier'](features[:,-1,:])       # [bs, 1]
+            actions.append(action.squeeze(-1))
+                    
+            # graph_features = self.map_cnn(minimap)                      # [bs, minimap_out_dim]
+            # health_features = self.health_encoder(health)               # [bs, health_out_dim]
+            # hardcoded_features = \
+            #     self.hardcoded_head(torch.cat([graph_features, health_features], dim=1))
+            
+            # features, _ = self.branches[label]['gru'](frame_features)   # [bs, seq_len, gru_hs]
+            # action = self.branches[label]['classifier'](torch.cat([features[:,-1,:], hardcoded_features], dim=1))
+            # actions.append(action.squeeze(-1))
 
+        actions = torch.stack(actions, dim=1)
+        actions[:,1] *= 3
+        return actions
         # pred_action = torch.stack(out_list, dim=2)[:, -1, :] #[bs, 4]
-        move = (out_list[0] > 0.5).to(torch.int)
-        out_list = [
-            out_list[0] > 0.5,  # move
-            ((out_list[1] + 1) * 128) % 256,  # angle
-            out_list[2] > 0.5,  # attack
-            out_list[3] > 0.5,  # skill
+        actions = [
+            actions[0] > 0.5,  # move
+            ((actions[1] + 1) * 128) % 256,  # angle
+            actions[2] > 0.5,  # attack
+            actions[3] > 0.5,  # skill
         ]
 
-        out_list = list(map(lambda x: x.to(torch.long), out_list))
-        out_list = [
-            one_hot(out_list[0], 2),
-            one_hot(out_list[1], 256),
-            one_hot(out_list[2], 2),
-            one_hot(out_list[3], 2),
+        actions = list(map(lambda x: x.to(torch.long), actions))
+        actions = [
+            one_hot(actions[0], 2),
+            one_hot(actions[1], 256),
+            one_hot(actions[2], 2),
+            one_hot(actions[3], 2),
         ]
 
-        pred_action = torch.cat(out_list, dim=1)
-        return pred_action
-
-    def activate_branch(self, label):
-        # 冻结所有分支
-        for branch in self.branches.values():
-            for param in branch.parameters():
-                param.requires_grad = False
-        # 激活当前分支
-        for param in self.branches[label].parameters():
-            param.requires_grad = True
+        actions = torch.cat(actions, dim=1)
+        return actions
 
 
 class ValueModel(nn.Module):
-    def __init__(self, gru_hs=128, hardcode_hs=128, minimap_out_dim=64, health_out_dim=32, num_layers=2):
+    def __init__(self, gru_hs=256, gru_layers=1, hardcode_hs=128, minimap_out_dim=64, health_out_dim=16):
         super().__init__()
 
         self.effi_net = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
         in_features = self.effi_net.classifier[1].in_features  # 1280
         self.effi_net.classifier = nn.Identity()  # Remove original classifier
-        self.gru = nn.GRU(in_features, gru_hs, batch_first=True, num_layers=num_layers)
+        
+        for i in range(7):
+            for param in self.effi_net.features[i].parameters():
+                param.requires_grad = False
+        
+        # self.gru = nn.GRU(in_features, gru_hs, batch_first=True, num_layers=gru_layers)
+        gru_hs = in_features
 
         # --- 小地图处理子分支 ---
         self.map_cnn = nn.Sequential(
@@ -163,26 +168,26 @@ class ValueModel(nn.Module):
 
         self.classifier = \
             nn.Sequential(
-                nn.Linear(gru_hs + hardcode_hs, 512),
-                nn.BatchNorm1d(512),
+                nn.Linear(gru_hs + hardcode_hs, 768),
+                nn.BatchNorm1d(768),
                 nn.ReLU(),
                 nn.Dropout(0.5),
-                nn.Linear(512, 64),
-                nn.BatchNorm1d(64),
+                nn.Linear(768, 256),
+                nn.BatchNorm1d(256),
                 nn.ReLU(),
                 nn.Dropout(0.3),
-                nn.Linear(64, 1)
+                nn.Linear(256, 1)
             )
 
     def forward(self, x) -> torch.Tensor:
-        frame, minimap, health = x  # frame: (B, 10, 3, 90, 160), minimap: (B, 2, 5, 5), health: (B, 3)
+        frame, minimap, health = x  # frame: (B, 10, 3, 180, 320), minimap: (B, 3, 5, 5), health: (B, 3)
 
-        bs, seq_len, C, H, W = frame.shape
-        frame = frame.view(bs * seq_len, C, H, W)
+        frame = frame[:,-1,:,:,:]
+        bs, C, H, W = frame.shape
         frame_features = self.effi_net(frame)
-        frame_features = frame_features.view(bs, seq_len, -1)
-        frame_features, _ = self.gru(frame_features)
-        frame_features = frame_features[:, -1, :]
+        frame_features = frame_features.view(bs, -1)
+        # frame_features, _ = self.gru(frame_features)
+        # frame_features = frame_features[:, -1, :]
 
         graph_features = self.map_cnn(minimap)
         health_features = self.health_encoder(health)
@@ -196,7 +201,9 @@ class ValueModel(nn.Module):
 
 
 if __name__ == "__main__":
-    weights = EfficientNet_B0_Weights.DEFAULT
-    data = torch.zeros(1, 10, 3, 360, 640)
+    # data = torch.zeros(1, 10, 3, 360, 640)
     effi_net = ActorModel()
-    effi_net(data)
+    
+    # for name, param in effi_net.effi_net.features.named_parameters():
+    #     print(name)
+        

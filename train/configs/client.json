@@ -3,6 +3,11 @@
     "port": 55555,
 
     "ckpts": {
+        "dead": {
+            "image": "./configs/ckpts/client/dead.png",
+            "threshold": 50,
+            "crop": [200,520,480,800]
+        },
         "game_over": {
             "image": "./configs/ckpts/client/game_over.png",
             "threshold": 100
@@ -17,7 +22,7 @@
         },
         "character_started": {
             "image": "./configs/ckpts/client/character_started.png",
-            "threshold": 100
+            "threshold": 200
         },
         "choose_mode": {
             "image": "./configs/ckpts/client/choose_mode.png",
@@ -25,22 +30,28 @@
         },
         "portal": {
             "image": "./configs/ckpts/client/portal.png",
-            "threshold": 150
+            "threshold": 150,
+            "crop": [0,450,0,1280]
         }
     },
     "task_flow": {
         "restart": [
             {
+                "action": "detect",
+                "ckpt": "dead",
+                "timeout": 2
+            },
+            {
                 "action": "click",
                 "pos": {
-                    "x": 500,
+                    "x": 550,
                     "y": 420
                 }
             },
             {
                 "action": "detect",
                 "ckpt": "game_over",
-                "timeout": 5
+                "timeout": 2
             },
             {
                 "action": "click",
@@ -75,7 +86,7 @@
             {
                 "action": "detect",
                 "ckpt": "character_ready",
-                "timeout": 2
+                "timeout": 3
             },
             {
                 "action": "click",
@@ -87,7 +98,7 @@
             {
                 "action": "detect",
                 "ckpt": "character_started",
-                "timeout": 2
+                "timeout": 3
             },
             {
                 "action": "move",
@@ -130,6 +141,13 @@
                 "action": "detect",
                 "ckpt": "portal",
                 "timeout": 3
+            }
+        ],
+        "portal": [
+            {
+                "action": "detect",
+                "ckpt": "portal",
+                "timeout": 2
             }
         ]
     }
