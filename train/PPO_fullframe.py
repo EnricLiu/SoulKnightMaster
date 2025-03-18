@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.policies import ActorCriticPolicy
-from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.env_util import make_vec_env, DummyVecEnv
 from torch import nn
 from torch.nn.functional import one_hot, avg_pool2d
 from pathlib import Path
@@ -41,6 +41,7 @@ class SoulKnightMasterPolicy(ActorCriticPolicy):
         self.action_net = ActorModel()
         print("[SKMPolicyInit] initing value model...")
         self.value_net = ValueModel()
+        self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.parameters()), lr=lr_schedule(1))
         
         # try:
             # 安全加载模型参数（添加weights_only=True）
@@ -52,17 +53,18 @@ class SoulKnightMasterPolicy(ActorCriticPolicy):
         print("[SKMPolicyInit] Finish!")
 
     def forward(self, obs, deterministic=False):
-        action = self.action_net(obs)
+        action = self.predict(obs)
         values = self.predict_values(obs)               # [n_envs, 1]
         
         distribution = self._get_action_dist_from_latent(action)
         actions = distribution.get_actions(deterministic=deterministic)
         log_prob = distribution.log_prob(actions)
-        
+        # print("Raw entropy:", distribution.entropy().mean().item())
+        # print("Action logits stats:", actions.mean().item(), actions.std().item())
         return actions, values, log_prob
     
     def evaluate_actions(self, obs, actions):
-        action = self.action_net(obs)
+        action = self.predict(obs)
         distribution = self._get_action_dist_from_latent(action)
         log_prob = distribution.log_prob(actions)
         values = self.predict_values(obs)
@@ -70,54 +72,95 @@ class SoulKnightMasterPolicy(ActorCriticPolicy):
         
         return values, log_prob, entropy
     
+    def predict(self, obs) -> torch.Tensor:
+        frames, minimaps, healths = obs["frames"], obs["minimap"], obs["health"]
+        actions = self.action_net((frames, minimaps, healths))               # [n_envs, 4]
+        return actions
+    
     def predict_values(self, obs) -> torch.Tensor:
         frames, minimaps, healths = obs["frames"], obs["minimap"], obs["health"]
-        n_envs, seq_len, C, H, W = frames.shape                             # [n_envs, 10, 3, 180, 320]
-        frames = frames.view(n_envs * seq_len, C, H, W)
-        frames = avg_pool2d(frames, kernel_size=2, stride=2)                # [n_envs, 10, 3,  90, 160]
-        frames = frames.view(n_envs, seq_len, C, H//2, W//2)
+        # n_envs, seq_len, C, H, W = frames.shape                             # [n_envs, 10, 3, 180, 320]
+        # frames = frames.view(n_envs * seq_len, C, H, W)
+        # frames = avg_pool2d(frames, kernel_size=2, stride=2)                # [n_envs, 10, 3,  90, 160]
+        # frames = frames.view(n_envs, seq_len, C, H//2, W//2)
         
         values = self.value_net((frames, minimaps[:,-1], healths[:,-1]))    # [n_envs, 1]
 
         return values
     
     def _get_action_dist_from_latent(self, latent_pi):
-        # 返回动作分布
-        return self.action_dist.proba_distribution(action_logits=latent_pi)
+        return self.action_dist.proba_distribution(mean_actions=latent_pi, log_std=self.log_std)
 
     def _get_value_dist_from_latent(self, latent_vf):
         # 返回价值估计
         return latent_vf
+
+import wandb
+from wandb.integration.sb3 import WandbCallback
+WANDB_CFG = json.load(open("./configs/wandb.json"))
+TRAIN_PARAMS = {
+    "n_steps":          128,
+    "batch_size":       2,
+    "learning_rate":    4e-3,
+    "n_epochs":         2,
+    "ent_coef":         0.01,
+}
+
+if not wandb.login(key=WANDB_CFG["secret"], relogin=True, timeout=5):
+    print("Failed to login to wandb")
+    exit()
+    
+RUN = wandb.init(
+    entity=WANDB_CFG["entity"],
+    project="SoulKnightMaster_FullFrame",
+    config=TRAIN_PARAMS,
+    sync_tensorboard=True,
+)
+
 
 if __name__ == "__main__":
     import json
     log_path = Path("./logs/")
     log_path.mkdir(parents=True, exist_ok=True)
     
+    
     print("Loading Config")
     client_config = json.load(open("./configs/client.json"))
     minimap_config = json.load(open("./configs/minimap.json"))
+    
     print("Making Env")
-    env = make_vec_env(lambda: SoulKnightEnv("cuda", client_config, minimap_config), n_envs=1)
+    def make_sk_env(name):
+        def _init():
+            return SoulKnightEnv("cuda", client_config, minimap_config, name=name, logger=RUN.log)
+        return _init
+
+    env = DummyVecEnv([make_sk_env(name) for name in ["SKM_16448"]])
+    # env = make_vec_env(lambda: SoulKnightEnv("cuda", client_config, minimap_config), n_envs=2)
+    
     print("Making Model")
+    model = None
     try:
-        start = round(time.time())
-        model = \
-            PPO(SoulKnightMasterPolicy, env,
-                tensorboard_log=str(log_path.absolute()), verbose=2, 
-                n_steps=192, batch_size=2, learning_rate=1e-1, n_epochs=1, ent_coef=0.01
-            )
+        model = PPO(SoulKnightMasterPolicy, env,
+                    tensorboard_log=f"runs/{RUN.name}", verbose=2, 
+                    **TRAIN_PARAMS)
+        # model = PPO.load("./ckpt/fullframe_map_health/charmed-darkness-101-2025_03_18-15_28_09.zip",
+        #                  env, tensorboard_log=f"runs/{RUN.name}", verbose=2,  **TRAIN_PARAMS)
         print("Start Learning")
         model.learn(
-            total_timesteps =1_000_000,
+            total_timesteps = 1_000_000,
             reset_num_timesteps = True,
-            tb_log_name = "SoulKnightMaster_FullFrame"
+            tb_log_name = "SoulKnightMaster_FullFrame",
+            callback=WandbCallback(
+                model_save_path=f"./ckpt/fullframe_map_health/{RUN.name}-{time.strftime('%Y_%m_%d-%H_%M_%S', time.localtime())}",
+                model_save_freq=8192,
+                verbose=2,
+            )
         )
     except Exception as e:
-        # print(e)
+        print(e)
         raise e
     finally:
-        train_duration = round(round(time.time()) - start)
-        print("Model Saving")
-        # if model is not None:
-        #     model.save(f"./ckpt/fullframe/{start}_step={train_duration}")
+        if model is not None:
+            model.save(f"./ckpt/fullframe_map_health/{RUN.name}-{time.strftime('%Y_%m_%d-%H_%M_%S', time.localtime())}")
+            print("Model Saved")
+        RUN.finish()

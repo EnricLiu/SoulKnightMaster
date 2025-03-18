@@ -60,7 +60,6 @@ class AutoPilotClient(Client):
         if isinstance(img, np.ndarray):
             if resize is None:
                 pixels = img.dot([0.2989, 0.5870, 0.1140]).astype(np.uint8)
-                print(pixels.shape)
             else:
                 img = Image.fromarray(img)
                 
@@ -82,24 +81,35 @@ class AutoPilotClient(Client):
         for key, value in ckpt_config.items():
             image = Image.open(value["image"]).convert("L")
             threshold = value["threshold"]
-            self.ckpts[key] = (threshold, self.dhash(image))
+            crop = value.get("crop")
+            if crop is not None: 
+                image = np.array(image)[crop[0]:crop[1], crop[2]:crop[3]]
+                image = Image.fromarray(image)
+            self.ckpts[key] = (threshold, self.dhash(image), crop)
 
     def _detect_ckpt(self, ckpt_name: str, timeout: int):
         lowest_distance = 114514
-        thresh, target_dhash = self.ckpts[ckpt_name]
+        thresh, target_dhash, crop = self.ckpts[ckpt_name]
 
         timeout = time.time() + timeout
         while time.time() < timeout:
-            image = Image.fromarray(self.fetch_fb())
-            dhash = self.dhash(image)
+            img = self.fetch_fb()
+            if crop is not None: img = img[crop[0]:crop[1], crop[2]:crop[3]]
+            # Image.fromarray(img).show()
+            # exit()
+            dhash = self.dhash(img)
             is_same, distance = self.judge_by_dhash(dhash, target_dhash, thresh)
             lowest_distance = min(lowest_distance, distance)
-            if is_same:
-                return True, distance
-            time.sleep(0.1)
+            if is_same: return True, distance
+            time.sleep(0.25)
         else:
             return False, lowest_distance
 
+    def _detect_ckpt_to_raw(self, ckpt_name: str, img: np.ndarray) -> bool:
+        thresh, target_dhash, crop = self.ckpts[ckpt_name]
+        if crop is not None: img = img[crop[0]:crop[1], crop[2]:crop[3]]
+        dhash = self.dhash(img)
+        return self.judge_by_dhash(dhash, target_dhash, thresh)
 
     def _take_action(self, action: dict):
         act_type = action["action"]
@@ -143,7 +153,6 @@ class AutoPilotClient(Client):
 
         move_flag = False
         retry_cnt = 0
-        p_ensure = 0
         p_action = 0
         while time.time() - start < timeout:
             action = task[p_action]
@@ -156,15 +165,15 @@ class AutoPilotClient(Client):
                 move_flag = True
             elif move_flag:
                 self._take_action({"action": "stop_move"})
+                self._take_action({"action": "stop_move"})
                 move_flag = False
 
             if is_good:
-                if act_type == "detect": p_ensure = p_action
+                retry_cnt = 0
                 p_action += 1
                 if p_action >= len(task):
                     return True
             else:
-                p_action = p_ensure
                 retry_cnt += 1
                 if retry_cnt >= max_retry: 
                     return False
@@ -176,7 +185,12 @@ if __name__ == "__main__":
     config = json.load(open("./configs/client.json"))
     client = AutoPilotClient("SKM_16448", config)
     
-    client.try_task("restart")
+    # client.try_task("restart")
+    
+    while True:
+        res, distance = client._detect_ckpt("portal", timeout=0.25)
+        print(res, distance)
+        time.sleep(0.25)
     # client.sync_action("SKM_16448", Action(None, False, False, False))
     
     # client.sync_action(Action(pi/2, False, False, False))

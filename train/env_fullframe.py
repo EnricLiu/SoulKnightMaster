@@ -1,9 +1,8 @@
 from pathlib import Path
-import math
+import math, json
 
-import cv2
+import wandb
 import numpy as np
-from PIL import Image
 import gymnasium as gym
 
 import torch
@@ -32,18 +31,29 @@ STATE_CONFIG = {
         "self_combat": 37000
     }
 }
+
+WANDB_CFG = json.load(open("./configs/wandb.json"))
+TRAIN_PARAMS = {
+    "n_steps":          128,
+    "batch_size":       2,
+    "learning_rate":    3e-2,
+    "n_epochs":         1,
+    "ent_coef":         0.01,
+}
+
     
 
 class SoulKnightEnv(gym.Env):
-    def __init__(self, device, autopilot_config: dict, minimap_config: dict):
+    def __init__(self, device, autopilot_config: dict, minimap_config: dict, name:str, logger=None):
         print("[EnvInit] initing parent...")
         super(SoulKnightEnv, self).__init__()
         
         print("[EnvInit] making client...")
+        self.name = name
+        self.logger = logger
         self.device = device
-        self.client = AutoPilotClient("SKM_16448", autopilot_config)
+        self.client = AutoPilotClient(name, autopilot_config)
         self.minimap = SoulKnightMinimap(minimap_config)
-        
         # self.observation_space = gym.spaces.Box(
         #     low =   -float("inf"),
         #     high =   float("inf"),
@@ -79,10 +89,17 @@ class SoulKnightEnv(gym.Env):
             "health":   torch.zeros((10, 3), dtype=torch.float32).to("cpu"),
         }
         # is_move[0-1], move_angle[0-255], is_attack[0-1], is_skill[0-1]
-        self.action_space = gym.spaces.MultiDiscrete([2, 256, 2, 2])
+        # self.action_space = gym.spaces.MultiDiscrete([2, 256, 2, 2])
+        self.action_space = gym.spaces.Box(
+            low =   -5,
+            high =   5,
+            shape = (4,),
+            dtype = np.float32
+        )
         self.running_timer = 0
         self.in_portal = False
         self.last_target_dir = 0
+        self.idle_cnt = 0
         
         self.steps = 0
         self.rewards = np.zeros((128), dtype=np.float32)
@@ -97,8 +114,7 @@ class SoulKnightEnv(gym.Env):
     def reset(self, *args, **kwargs):
         """ 重置环境并返回初始观测 """
         # 1. 获取原始游戏画面
-        task_res = False
-        task_res = self.client.try_task("restart", timeout=60, max_retry=1)
+        task_res = self.client.try_task("restart", timeout=120, max_retry=3)
         self.minimap.reset()
         obs, raw_frame = self.fetch_obs()
         print(raw_frame.shape)
@@ -111,20 +127,20 @@ class SoulKnightEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         """ 执行动作并返回环境反馈 """
         # 1. 执行游戏动作
-        action = Action.from_raw(action)
+        action: Action = Action.from_raw(action)
         self.client.sync_action(action)
         # 2. 获取新状态
         obs, raw_frame = self.fetch_obs()
         self.minimap.update(self.minimap.crop_minimap(raw_frame))
         new_state = self._extract_game_state(raw_frame)
         # 3. 计算奖励
-        reward = self._calculate_reward(new_state, action)
+        reward = self._calculate_reward(new_state, action, raw_frame)
         # select buff
-        if self._check_portal_state(new_state):
+        if self._check_portal_state(raw_frame):
             self.client.sync_click(Position(640, 640))
             self.client.sync_click(Position(640, 640))
         # 4. 判断回合终止
-        terminated = self._check_done_condition(new_state)
+        terminated = self._check_done_condition(raw_frame)
         truncated = False                                                           # TODO: impl truncated
         # 5. 更新状态跟踪
         self.prev_state = new_state
@@ -133,16 +149,23 @@ class SoulKnightEnv(gym.Env):
         self.show_reward()
         self.rewards = np.roll(self.rewards, 1, axis=0)
         self.rewards[-1] = reward
-
+        
+        if self.logger is not None:
+            self.logger({
+                "action/reward": reward,
+                "action/target": self.last_target_dir,
+                "action/angle": action._angle if action is not None and action._angle is not None else 0,
+            }, commit=True)
+                
         return obs, reward, terminated, truncated, {}
     
 
     def fetch_obs(self) -> tuple[np.ndarray, np.ndarray]:
-        """fetch_fb and extract features, then update the feature dequeue
+        """fetch_fb and update the frames dequeue(obs)
         
         Returns:
             tuple[]:
-            (features, raw_frame): np.ndarray (1, 10, 1280), np.ndarray (1, 1280)
+            (features, raw_frame): np.ndarray (1, 10, 720, 1280, 3), np.ndarray (720, 1280, 3)
         """
         raw_frame = self.client.fetch_fb()  # [720, 1280, 3]
         
@@ -203,7 +226,7 @@ class SoulKnightEnv(gym.Env):
 
 
         # 状态判断逻辑
-        state["in_portal"]      = self._check_portal_state(state)
+        state["in_portal"]      = self._check_portal_state(frame)
         state["combat_state"]   = state["self"] <= STATE_CONFIG["thresholds"]["self_combat"]
         state["blood_level"]    = self._quantize_value(state["blood"],  STATE_CONFIG["thresholds"]["blood"])
         state["shield_level"]   = self._quantize_value(state["shield"], STATE_CONFIG["thresholds"]["shield"])
@@ -211,35 +234,40 @@ class SoulKnightEnv(gym.Env):
 
         return state
 
-    def _calculate_reward(self, current_state: dict, action: Action) -> float:
+    def _calculate_reward(self, current_state: dict, action: Action, raw_frame: np.ndarray) -> float:
         """ 基于状态变化的奖励计算 """
         reward = 0.0
 
         # 传送门奖励（优先级最高）
-        if current_state["in_portal"] and not self.prev_state["in_portal"]:
-            self.minimap.reset()
-            return 500
+        if current_state["in_portal"]:
+            if not self.prev_state["in_portal"]:
+                self.minimap.reset()
+                return 100
+            return 0
 
+        res, distance = self.client._detect_ckpt_to_raw("dead", raw_frame)
+        if res: reward -= 200 # dead :(
+            
         # 血量变化
         blood_diff = current_state["blood_level"] - self.prev_state["blood_level"]
         if current_state["blood_level"] == 0:
-            reward -= 2000
+            pass
         elif blood_diff < 0:
             if self.prev_state["blood_level"] == 2 and current_state["blood_level"] == 1:
-                reward -= 20
+                reward -= 50
         elif blood_diff > 0:
             reward += abs(blood_diff) * 10
 
         # 盾量变化
         shield_diff = current_state["shield_level"] - self.prev_state["shield_level"]
-        reward += shield_diff * (-1 if shield_diff < 0 else 2)
+        reward += shield_diff * (-10 if shield_diff < 0 else 5)
 
         # 蓝量变化
         mana_diff = current_state["mana_level"] - self.prev_state["mana_level"]
         if mana_diff < 0:  # 蓝量减少
-            reward += mana_diff * 2 * (1 - current_state["mana_level"] / 100)
+            reward -= mana_diff * 5 * (1 - current_state["mana_level"] / 100)
         else:  # 蓝量增加
-            reward += mana_diff * 0.8 * (1 - current_state["mana_level"] / 100)
+            reward += mana_diff * 2 * (1 - current_state["mana_level"] / 100)
         
         # 状态转换奖励
         if not current_state["combat_state"] and self.prev_state["combat_state"]:
@@ -249,6 +277,9 @@ class SoulKnightEnv(gym.Env):
         if current_state["combat_state"] and not self.prev_state["combat_state"]:
             reward += 50
             self.running_duration = 0
+            
+        if current_state["combat_state"]:
+            reward -= np.power(0.1 * self.running_duration, 1/4)
             
         if not current_state["combat_state"]:
             # minimap direction
@@ -260,20 +291,25 @@ class SoulKnightEnv(gym.Env):
             # img = self.minimap._render()
             # cv2.imshow("minimap", img)
             # key = cv2.waitKey(50)
-            if self.steps % 128 == 0: print("GOOGLE_MAP: ", target_dir)
+            if self.steps % 128 == 0: print(f"[{self.name}] GOOGLE_MAP: ", target_dir)
             
             if action._angle is not None:
+                self.idle_cnt = 0
+                K = 3
                 action_angle = action._angle + math.pi/4
-                reward += 0.5 - ((target_dir - action_angle + math.pi) % (2 * math.pi) - math.pi) ** 2 / 10
-            
+                diff = (target_dir - action_angle - np.pi) % (2 * np.pi) - np.pi
+                reward += np.exp(- K * np.abs(diff)) * 10 - diff ** 4 / 5
+            else:
+                self.idle_cnt += 1
+                reward -= np.power(0.5 * self.idle_cnt, 1/4)
             # idle
-            reward -= 0.1
+            # reward -= 1
             self.running_duration += 1
             # if self.running_duration >= 100:  # 假设每步0.125秒，1.25秒=100步
             #     reward -= 0.01
             #     self.running_duration = 0
 
-        return reward * 0.01
+        return reward * 0.1
 
     def _quantize_value(self, value: float, thresholds: list) -> int:
         """ 将连续值量化为离散等级 """
@@ -282,12 +318,12 @@ class SoulKnightEnv(gym.Env):
                 return len(thresholds) - i
         return 0
 
-    def _check_portal_state(self, state: dict) -> bool:
+    def _check_portal_state(self, raw_frame: np.ndarray) -> bool:
         """ 判断是否在传送门中 """
-        portal_cond1 = (state["blood"] == state["shield"] == state["mana"])
-        portal_cond2 = (state["blood"] < 3e5 or state["shield"] < 3e5 or state["mana"] < 3e5)
-        return portal_cond1 or portal_cond2
+        res, distance = self.client._detect_ckpt_to_raw("portal", raw_frame)
+        return res
 
-    def _check_done_condition(self, state: dict) -> bool:
+    def _check_done_condition(self, raw_frame: np.ndarray) -> bool:
         """ 判断回合是否结束 """
-        return state["blood_level"] == 0  # 空血时结束
+        res, distance = self.client._detect_ckpt_to_raw("dead", raw_frame)
+        return res
