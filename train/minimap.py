@@ -196,8 +196,8 @@ class SoulKnightMinimap:
     
     def _extract_road(self, minimap: np.ndarray, grid_mask: np.ndarray):
         X, Y = grid_mask.shape
-        vertical   = np.zeros((X, Y), dtype=np.bool)
-        horizontal = np.zeros((X, Y), dtype=np.bool)
+        vertical   = np.zeros((X, Y), dtype=np.bool_)
+        horizontal = np.zeros((X, Y), dtype=np.bool_)
         vertical_pixels, horizontal_pixels = [], []
         for x in range(X):
             for y in range(Y):
