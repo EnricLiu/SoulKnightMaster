@@ -109,7 +109,8 @@ class SoulKnightMinimap:
         return None
     
     def render(self):
-        return Image.fromarray(self._render())
+        img = self._render()
+        return Image.fromarray(img) if img is not None else None
     
     def _render(self):
         nodes = self.graph.node_graph
@@ -516,7 +517,7 @@ if __name__ == "__main__":
         frame = client.fetch_fb()
         frame = frame[mini_map_region[1]:mini_map_region[3], mini_map_region[0]:mini_map_region[2]]
         try:
-            print("GoogleMap: ", minimap.navigate())
+            print("GoooooooogleMap: ", minimap.navigate())
             dir = minimap.update(frame)
             print(f"current at: {minimap.graph.curr_center}")
             print("node:")
