@@ -91,8 +91,8 @@ class SoulKnightEnv(gym.Env):
         # is_move[0-1], move_angle[0-255], is_attack[0-1], is_skill[0-1]
         # self.action_space = gym.spaces.MultiDiscrete([2, 256, 2, 2])
         self.action_space = gym.spaces.Box(
-            low =   -5,
-            high =   5,
+            low =   -1000000,
+            high =   1000000,
             shape = (4,),
             dtype = np.float32
         )
@@ -113,6 +113,7 @@ class SoulKnightEnv(gym.Env):
     
     def reset(self, *args, **kwargs):
         """ 重置环境并返回初始观测 """
+        self.client.sync_action(Action(None, False, False, False))
         # 1. 获取原始游戏画面
         task_res = self.client.try_task("restart", timeout=120, max_retry=3)
         self.minimap.reset()
@@ -149,7 +150,11 @@ class SoulKnightEnv(gym.Env):
         self.show_reward()
         self.rewards = np.roll(self.rewards, 1, axis=0)
         self.rewards[-1] = reward
-        
+        print({
+                "action/reward": reward,
+                "action/target": self.last_target_dir,
+                "action/angle": action._angle if action is not None else None,
+            })
         if self.logger is not None:
             self.logger({
                 "action/reward": reward,
@@ -238,48 +243,48 @@ class SoulKnightEnv(gym.Env):
         """ 基于状态变化的奖励计算 """
         reward = 0.0
 
-        # 传送门奖励（优先级最高）
-        if current_state["in_portal"]:
-            if not self.prev_state["in_portal"]:
-                self.minimap.reset()
-                return 100
-            return 0
-
-        res, distance = self.client._detect_ckpt_to_raw("dead", raw_frame)
-        if res: reward -= 200 # dead :(
-            
-        # 血量变化
-        blood_diff = current_state["blood_level"] - self.prev_state["blood_level"]
-        if current_state["blood_level"] == 0:
-            pass
-        elif blood_diff < 0:
-            if self.prev_state["blood_level"] == 2 and current_state["blood_level"] == 1:
-                reward -= 50
-        elif blood_diff > 0:
-            reward += abs(blood_diff) * 10
-
-        # 盾量变化
-        shield_diff = current_state["shield_level"] - self.prev_state["shield_level"]
-        reward += shield_diff * (-10 if shield_diff < 0 else 5)
-
-        # 蓝量变化
-        mana_diff = current_state["mana_level"] - self.prev_state["mana_level"]
-        if mana_diff < 0:  # 蓝量减少
-            reward -= mana_diff * 5 * (1 - current_state["mana_level"] / 100)
-        else:  # 蓝量增加
-            reward += mana_diff * 2 * (1 - current_state["mana_level"] / 100)
+        # # 传送门奖励（优先级最高）
+        # if current_state["in_portal"]:
+        #     if not self.prev_state["in_portal"]:
+        #         self.minimap.reset()
+        #         return 100
+        #     return 0
+        #
+        # res, distance = self.client._detect_ckpt_to_raw("dead", raw_frame)
+        # if res: reward -= 200 # dead :(
+        #
+        # # 血量变化
+        # blood_diff = current_state["blood_level"] - self.prev_state["blood_level"]
+        # if current_state["blood_level"] == 0:
+        #     pass
+        # elif blood_diff < 0:
+        #     if self.prev_state["blood_level"] == 2 and current_state["blood_level"] == 1:
+        #         reward -= 50
+        # elif blood_diff > 0:
+        #     reward += abs(blood_diff) * 10
+        #
+        # # 盾量变化
+        # shield_diff = current_state["shield_level"] - self.prev_state["shield_level"]
+        # reward += shield_diff * (-10 if shield_diff < 0 else 5)
+        #
+        # # 蓝量变化
+        # mana_diff = current_state["mana_level"] - self.prev_state["mana_level"]
+        # if mana_diff < 0:  # 蓝量减少
+        #     reward -= mana_diff * 5 * (1 - current_state["mana_level"] / 100)
+        # else:  # 蓝量增加
+        #     reward += mana_diff * 2 * (1 - current_state["mana_level"] / 100)
         
         # 状态转换奖励
-        if not current_state["combat_state"] and self.prev_state["combat_state"]:
-            reward += 10
-            self.running_duration = 0
-            
-        if current_state["combat_state"] and not self.prev_state["combat_state"]:
-            reward += 50
-            self.running_duration = 0
-            
-        if current_state["combat_state"]:
-            reward -= np.power(0.1 * self.running_duration, 1/4)
+        # if not current_state["combat_state"] and self.prev_state["combat_state"]:
+        #     reward += 10
+        #     self.running_duration = 0
+        #
+        # if current_state["combat_state"] and not self.prev_state["combat_state"]:
+        #     reward += 50
+        #     self.running_duration = 0
+        #
+        # if current_state["combat_state"]:
+        #     reward -= np.power(0.1 * self.running_duration, 1/4)
             
         if not current_state["combat_state"]:
             # minimap direction
@@ -296,19 +301,19 @@ class SoulKnightEnv(gym.Env):
             if action._angle is not None:
                 self.idle_cnt = 0
                 K = 3
-                action_angle = action._angle + math.pi/4
+                # action_angle = action._angle + math.pi/4
+                action_angle = action._angle
                 diff = (target_dir - action_angle - np.pi) % (2 * np.pi) - np.pi
                 reward += np.exp(- K * np.abs(diff)) * 10 - diff ** 4 / 5
             else:
                 self.idle_cnt += 1
-                reward -= np.power(0.5 * self.idle_cnt, 1/4)
+                reward -= 5 + np.power(0.5 * self.idle_cnt, 1/4)
             # idle
             # reward -= 1
             self.running_duration += 1
             # if self.running_duration >= 100:  # 假设每步0.125秒，1.25秒=100步
             #     reward -= 0.01
             #     self.running_duration = 0
-
         return reward * 0.1
 
     def _quantize_value(self, value: float, thresholds: list) -> int:
