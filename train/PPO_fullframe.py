@@ -101,7 +101,7 @@ WANDB_CFG = json.load(open("./configs/wandb.json"))
 TRAIN_PARAMS = {
     "n_steps":          256,
     "batch_size":       2,
-    "learning_rate":    1e-4,
+    "learning_rate":    3e-4,
     "n_epochs":         1,
     "ent_coef":         0.01,
 }
