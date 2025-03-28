@@ -13,9 +13,8 @@ from torchvision import transforms
 
 from utils import Action
 from model import MainModel
-from utils import Position
+from utils import Position, SoulKnightMinimap
 from client import AutoPilotClient
-from minimap import SoulKnightMinimap
 
 CKPT_PATH_COMBINE = Path("./pretrain/bn/1741430443-ln=skill-loss=8.477-e3.pth")
 STATE_CONFIG = {

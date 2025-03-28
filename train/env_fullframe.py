@@ -1,7 +1,6 @@
 from pathlib import Path
 import math, json
 
-import wandb
 import numpy as np
 import gymnasium as gym
 
@@ -10,10 +9,8 @@ import torch.nn as nn
 from torch.nn.functional import avg_pool2d
 from torchvision import transforms
 
-from utils import Action
-from utils import Position
+from utils import Action, Position, SoulKnightMinimap
 from client import AutoPilotClient
-from minimap import SoulKnightMinimap
 
 CKPT_PATH_COMBINE = Path("./pretrain/bn/1741430443-ln=skill-loss=8.477-e3.pth")
 STATE_CONFIG = {
@@ -31,17 +28,6 @@ STATE_CONFIG = {
         "self_combat": 37000
     }
 }
-
-WANDB_CFG = json.load(open("./configs/wandb.json"))
-TRAIN_PARAMS = {
-    "n_steps":          128,
-    "batch_size":       2,
-    "learning_rate":    3e-2,
-    "n_epochs":         1,
-    "ent_coef":         0.01,
-}
-
-    
 
 class SoulKnightEnv(gym.Env):
     def __init__(self, device, autopilot_config: dict, minimap_config: dict, name:str, logger=None):
@@ -114,12 +100,11 @@ class SoulKnightEnv(gym.Env):
     def reset(self, *args, **kwargs):
         """ 重置环境并返回初始观测 """
         self.client.sync_action(Action(None, False, False, False))
-        # 1. 获取原始游戏画面
         task_res = self.client.try_task("restart", timeout=120, max_retry=3)
+
         self.minimap.reset()
         obs, raw_frame = self.fetch_obs()
         print(raw_frame.shape)
-        # 3. 初始化状态跟踪
         self.prev_state = self._extract_game_state(raw_frame)
         self.running_duration = 0
 
@@ -127,9 +112,11 @@ class SoulKnightEnv(gym.Env):
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         """ 执行动作并返回环境反馈 """
+        self.client.check_status()
         # 1. 执行游戏动作
         action: Action = Action.from_raw(action)
-        self.client.sync_action(action)
+        res = self.client.sync_action(action)
+        if not res.get("success", False): print(f"[EnvStep] sync action failed: {res}")
         # 2. 获取新状态
         obs, raw_frame = self.fetch_obs()
         self.minimap.update(self.minimap.crop_minimap(raw_frame))
@@ -150,11 +137,6 @@ class SoulKnightEnv(gym.Env):
         self.show_reward()
         self.rewards = np.roll(self.rewards, 1, axis=0)
         self.rewards[-1] = reward
-        print({
-                "action/reward": reward,
-                "action/target": self.last_target_dir,
-                "action/angle": action._angle if action is not None else None,
-            })
         if self.logger is not None:
             self.logger({
                 "action/reward": reward,
@@ -243,48 +225,48 @@ class SoulKnightEnv(gym.Env):
         """ 基于状态变化的奖励计算 """
         reward = 0.0
 
-        # # 传送门奖励（优先级最高）
-        # if current_state["in_portal"]:
-        #     if not self.prev_state["in_portal"]:
-        #         self.minimap.reset()
-        #         return 100
-        #     return 0
-        #
-        # res, distance = self.client._detect_ckpt_to_raw("dead", raw_frame)
-        # if res: reward -= 200 # dead :(
-        #
-        # # 血量变化
-        # blood_diff = current_state["blood_level"] - self.prev_state["blood_level"]
-        # if current_state["blood_level"] == 0:
-        #     pass
-        # elif blood_diff < 0:
-        #     if self.prev_state["blood_level"] == 2 and current_state["blood_level"] == 1:
-        #         reward -= 50
-        # elif blood_diff > 0:
-        #     reward += abs(blood_diff) * 10
-        #
-        # # 盾量变化
-        # shield_diff = current_state["shield_level"] - self.prev_state["shield_level"]
-        # reward += shield_diff * (-10 if shield_diff < 0 else 5)
-        #
-        # # 蓝量变化
-        # mana_diff = current_state["mana_level"] - self.prev_state["mana_level"]
-        # if mana_diff < 0:  # 蓝量减少
-        #     reward -= mana_diff * 5 * (1 - current_state["mana_level"] / 100)
-        # else:  # 蓝量增加
-        #     reward += mana_diff * 2 * (1 - current_state["mana_level"] / 100)
+        # 传送门奖励（优先级最高）
+        if current_state["in_portal"]:
+            if not self.prev_state["in_portal"]:
+                self.minimap.reset()
+                return 100
+            return 0
+        
+        res, distance = self.client._detect_ckpt_to_raw("dead", raw_frame)
+        if res: reward -= 200 # dead :(
+        
+        # 血量变化
+        blood_diff = current_state["blood_level"] - self.prev_state["blood_level"]
+        if current_state["blood_level"] == 0:
+            pass
+        elif blood_diff < 0:
+            if self.prev_state["blood_level"] == 2 and current_state["blood_level"] == 1:
+                reward -= 50
+        elif blood_diff > 0:
+            reward += abs(blood_diff) * 10
+        
+        # 盾量变化
+        shield_diff = current_state["shield_level"] - self.prev_state["shield_level"]
+        reward += shield_diff * (-10 if shield_diff < 0 else 5)
+        
+        # 蓝量变化
+        mana_diff = current_state["mana_level"] - self.prev_state["mana_level"]
+        if mana_diff < 0:  # 蓝量减少
+            reward -= mana_diff * 5 * (1 - current_state["mana_level"] / 100)
+        else:  # 蓝量增加
+            reward += mana_diff * 2 * (1 - current_state["mana_level"] / 100)
         
         # 状态转换奖励
-        # if not current_state["combat_state"] and self.prev_state["combat_state"]:
-        #     reward += 10
-        #     self.running_duration = 0
-        #
-        # if current_state["combat_state"] and not self.prev_state["combat_state"]:
-        #     reward += 50
-        #     self.running_duration = 0
-        #
-        # if current_state["combat_state"]:
-        #     reward -= np.power(0.1 * self.running_duration, 1/4)
+        if not current_state["combat_state"] and self.prev_state["combat_state"]:
+            reward += 10
+            self.running_duration = 0
+        
+        if current_state["combat_state"] and not self.prev_state["combat_state"]:
+            reward += 50
+            self.running_duration = 0
+        
+        if current_state["combat_state"]:
+            reward -= np.power(0.1 * self.running_duration, 1/4)
             
         if not current_state["combat_state"]:
             # minimap direction
@@ -296,7 +278,7 @@ class SoulKnightEnv(gym.Env):
             # img = self.minimap._render()
             # cv2.imshow("minimap", img)
             # key = cv2.waitKey(50)
-            if self.steps % 128 == 0: print(f"[{self.name}] GOOGLE_MAP: ", target_dir)
+            if self.steps % 128 == 0: print(f"[{self.name}] GOOOOOOOOGLE_MAP: ", target_dir)
             
             if action._angle is not None:
                 self.idle_cnt = 0

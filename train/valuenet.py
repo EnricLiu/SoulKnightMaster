@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 from torchvision.models import EfficientNet_B0_Weights, efficientnet_b0
-from minimap import SoulKnightMinimap
+from utils import SoulKnightMinimap
 from torch.nn.functional import avg_pool2d
 
 
