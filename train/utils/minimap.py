@@ -6,9 +6,8 @@ import numpy as np
 from PIL import Image
 from PIL.Image import Image as _Image
 
-import torch
-
-from utils import Position, dhash, dhash_batch
+from .position import Position
+from .dhash import dhash, dhash_batch
     
 class SoulKnightMinimap:
     def __init__(self, config):
