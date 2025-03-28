@@ -2,6 +2,8 @@
     "ip": "127.0.0.1",
     "port": 55555,
 
+    "mumu_exec": "E:\\Netease\\MuMuPlayer-12.0\\shell\\MuMuPlayer.exe",
+
     "ckpts": {
         "dead": {
             "image": "./configs/ckpts/client/dead.png",
@@ -161,7 +163,7 @@
         "emu_reboot": [
             {
                 "action": "wait",
-                "time": 15
+                "time": 2
 
             },
             {
@@ -174,7 +176,7 @@
             {
                 "action": "detect",
                 "ckpt": "main",
-                "timeout": 10
+                "timeout": 20
             },
             {
                 "action": "wait",
@@ -189,7 +191,7 @@
             },
             {
                 "action": "wait",
-                "time": 2
+                "time": 1
             },
             {
                 "action": "click",

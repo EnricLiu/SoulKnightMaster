@@ -32,7 +32,13 @@ class Client:
         if res.status_code() != 200:
             if res.json().get("type", None) is None or res.json().get("msg", None) is None:
                 raise res.text()
-        return res.json()
+        
+        res = res.json()
+        if isinstance(res, list):
+            for node in res:
+                if node["node"] == self.node_name:
+                    return node
+        return res
     
     def deschedule(self):
         url = f"{self.url}/deschedule?node={self.node_name}"
@@ -78,7 +84,13 @@ class Client:
         if res.status_code() != 200:
             if res.json().get("type", None) is None or res.json().get("msg", None) is None:
                 raise res.text()
-        return res.json()
+    
+        res = res.json()
+        if isinstance(res, list):
+            for node in res:
+                if node["node"] == self.node_name:
+                    return node
+        return res
 
 
 class AutoPilotClient(Client):
@@ -86,6 +98,7 @@ class AutoPilotClient(Client):
         super().__init__(node_name, config["ip"], config["port"])
 
         self.task_flow = config["task_flow"]
+        self.mumu_exec = config["mumu_exec"]
         self.ckpts = {}
         self.load_ckpts(config["ckpts"])
 
@@ -159,20 +172,18 @@ class AutoPilotClient(Client):
             case "click":
                 x = action["pos"]["x"]
                 y = action["pos"]["y"]
-                status_code = self.sync_click(Position(x, y))
-                is_good = status_code == 200
+                res = self.sync_click(Position(x, y))
+                is_good = res.get("success", False)
             case "move":
                 direction = action["direction"] * pi / 180
                 duration = action["duration"]
-                status_code = self.sync_action(Action(direction, False, False, False))
-                if status_code != 200:
-                    is_good = False
-                else:
+                res = self.sync_action(Action(direction, False, False, False))
+                if res.get("success", False):
                     time.sleep(duration)
                     is_good = True
             case "stop_move":
-                status_code = self.sync_action(Action(None, False, False, False))
-                is_good = status_code == 200
+                res = self.sync_action(Action(None, False, False, False))
+                is_good = res.get("success", False)
             case "wait":
                 time.sleep(action["time"])
                 is_good =True
@@ -180,10 +191,14 @@ class AutoPilotClient(Client):
         return act_type, is_good
     
     def _reboot(self):
-        for proc in [proc for proc in psutil.process_iter(['name']) if proc.info['name'] == "MuMuPlayer.exe"]:
+        print("[DEBUG] adb kill server")
+        subprocess.Popen(f"adb kill-server")
+        for proc in [proc for proc in psutil.process_iter(['name']) if proc.info['name'] in ["MuMuPlayer.exe", "MuMuPlayerService.exe", "MuMuVMMHeadless.exe", "MuMuVMMSVC.exe"]]:
             proc.terminate()
-            proc.wait(timeout=5)
-        subprocess.Popen("MuMuPlayer.exe -v 2") 
+            print("[DEBUG] terminated!")
+        time.sleep(3)
+        subprocess.Popen(f"{self.mumu_exec} -v 2")
+        print("[DEBUG] re-opened!")
     
     def check_status(self):
         res = self.fetch_status()
@@ -192,13 +207,16 @@ class AutoPilotClient(Client):
                 res = self.deschedule()
                 if not res.get("success", False): 
                     raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
+                print(f"[DEBUG] DEScheduled!")
                 res = self._reboot()
-                res = self.try_task("emu_reboot")
-                if not res: 
-                    raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
+                print(f"[DEBUG] WAITING for boot...")
+                time.sleep(10)
+                print(f"[DEBUG] START TASK!")
                 res = self.schedule()
                 if not res.get("success", False): 
                     raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
+                print(f"[DEBUG] Scheduled!")
+                self.try_task("emu_reboot", timeout=120)
                 res = self.fetch_status()
                 if res.get("status", "DEAD") not in ["RUNNING", "IDLE"]: 
                     raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
@@ -241,9 +259,11 @@ class AutoPilotClient(Client):
 if __name__ == "__main__":
     import json
     config = json.load(open("./configs/client.json"))
-    client = AutoPilotClient("SKM_16448", config)
+    client = AutoPilotClient("SKM_16449", config)
     
     print(client.sync_click(Position(1,2)))
+    # print(client.sync_action(Action(None, False, False, False)))
+    
     # client.try_task("restart")
     
     # while True:

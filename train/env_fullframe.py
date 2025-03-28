@@ -99,6 +99,7 @@ class SoulKnightEnv(gym.Env):
     
     def reset(self, *args, **kwargs):
         """ 重置环境并返回初始观测 """
+        self.client.check_status()
         self.client.sync_action(Action(None, False, False, False))
         task_res = self.client.try_task("restart", timeout=120, max_retry=3)
 
@@ -115,8 +116,7 @@ class SoulKnightEnv(gym.Env):
         self.client.check_status()
         # 1. 执行游戏动作
         action: Action = Action.from_raw(action)
-        res = self.client.sync_action(action)
-        if not res.get("success", False): print(f"[EnvStep] sync action failed: {res}")
+        _ = self.client.sync_action(action)
         # 2. 获取新状态
         obs, raw_frame = self.fetch_obs()
         self.minimap.update(self.minimap.crop_minimap(raw_frame))
