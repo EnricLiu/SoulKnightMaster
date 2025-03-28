@@ -3,6 +3,7 @@ pub use position::Position;
 use std::sync::atomic::AtomicUsize;
 use std::sync::LazyLock;
 use chrono::{DateTime, Local};
+use log::debug;
 
 pub static COUNTER: AtomicUsize = AtomicUsize::new(0);
 pub static DEBUG: bool = false;
@@ -13,13 +14,6 @@ pub static START: LazyLock<DateTime<Local>> = LazyLock::new(|| {
 
 pub fn get_id() -> usize {
     COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-}
-
-pub fn log(s: &str) {
-    if !DEBUG {
-        return;
-    }
-    println!("[DEBUG] {s}");
 }
 
 pub fn perf_timer() -> Option<DateTime<Local>> {
@@ -35,6 +29,6 @@ pub fn perf_log(s: &str, start: Option<DateTime<Local>>) {
     }
     if let Some(start) = start {
         let end = Local::now();
-        println!("[DEBUG] {s} <-{}ms->", (end - start).num_milliseconds());
+        debug!("{s} <-{}ms->", (end - start).num_milliseconds());
     }
 }

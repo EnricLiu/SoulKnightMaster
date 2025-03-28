@@ -14,13 +14,13 @@ use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use image::{ImageBuffer, Rgba};
 use adb_client::{ADBDeviceExt, ADBServerDevice};
-
+use log::{debug, trace};
 use error::Error;
 use pool::DeviceConnPool;
 use event::{Key, KeyValue};
 use action::{InputAction, InputFactory};
 
-use crate::utils::{get_id, log, perf_log, perf_timer, Position, START};
+use crate::utils::{get_id, perf_log, perf_timer, Position, START};
 
 #[derive(Debug)]
 pub enum ShellCommand<'a> {
@@ -120,7 +120,7 @@ impl<const POOL_SIZE: usize> Device<POOL_SIZE> {
                 return Ok(Arc::try_unwrap(device).or(Err(Error::ArcFailedUnwrap()))?);
             };
             drop(pool);
-            log("Waiting");
+            trace!("Waiting");
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
@@ -138,7 +138,7 @@ impl<const POOL_SIZE: usize> Device<POOL_SIZE> {
         let task_id = get_id();
         
         let start = perf_timer();
-        log(&format!("[{task_id}] Reading FB!"));
+        trace!("[{task_id}] Reading FB!");
 
         let task = spawn_blocking(move || {
             let res = conn.framebuffer_inner();
@@ -167,15 +167,10 @@ impl<const POOL_SIZE: usize> Device<POOL_SIZE> {
             perf_log(&format!("[{task_id}] Joined!!"), Some(*START));
             (res, conn)
         });
-
-        let pool = self.pool.clone();
-        let res = tokio::spawn(async move {
-            let (res, conn) = task.await?;
-            pool.lock().await.release(Arc::new(conn)).await;
-            Ok(res?)
-        }).await?;
-
-        res
+        let (res, conn) = task.await?;
+        self.pool.lock().await.release(Arc::new(conn)).await;
+        
+        Ok(res?)
     }
 }
 
@@ -198,14 +193,14 @@ impl<'a, const POOL_SIZE: usize> Device<POOL_SIZE> {
     pub async fn key_down(&self, key: Key) -> Result<(), Error> {
         let action = self.action_man.get_key_down_action(key).await;
         let command = action.into();
-        log(&format!("KeyDown {:?}", &command));
+        debug!("KeyDown {:?}", &command);
         self.send_action(&command).await?;
         Ok(())
     }
     pub async fn key_up(&self, key: Key) -> Result<(), Error> {
         let action = self.action_man.get_key_up_action(key).await;
         let command = action.into();
-        log(&format!("KeyUp {:?}", &command));
+        debug!("KeyUp {:?}", &command);
         self.send_action(&command).await?;
         Ok(())
     }
@@ -214,7 +209,7 @@ impl<'a, const POOL_SIZE: usize> Device<POOL_SIZE> {
         let action = self.action_man.get_touch_down_action(iden, pos).await;
         if action.is_none() { return Ok(()) };
         let command = action.unwrap().into();
-        log(&format!("TouchDown['{iden}'] {:?}", &command));
+        debug!("TouchDown['{iden}'] {:?}", &command);
         self.send_action(&command).await?;
         Ok(())
     }
@@ -223,7 +218,7 @@ impl<'a, const POOL_SIZE: usize> Device<POOL_SIZE> {
         let action = self.action_man.get_touch_move_action(iden, pos).await;
         if action.is_none() { return Ok(()) };
         let command = action.unwrap().into();
-        log(&format!("TouchMove['{iden}'] {:?}", &command));
+        debug!("TouchMove['{iden}'] {:?}", &command);
         self.send_action(&command).await?;
         Ok(())
     }
@@ -232,7 +227,7 @@ impl<'a, const POOL_SIZE: usize> Device<POOL_SIZE> {
         let action = self.action_man.get_touch_up_action(iden).await;
         if action.is_none() { return Ok(()) };
         let command = action.unwrap().into();
-        log(&format!("TouchUp['{iden}'] {:?}", &command));
+        debug!("TouchUp['{iden}'] {:?}", &command);
         self.send_action(&command).await?;
         Ok(())
     }

@@ -2,9 +2,10 @@ use std::fmt;
 use std::ops::Add;
 use std::sync::Arc;
 use dashmap::DashMap;
+use log::error;
 use tokio::sync::{RwLock};
 use crate::adb::event::{Key, KeyValue, AdbEvent};
-use crate::utils::{log, Position};
+use crate::utils::{Position};
 
 #[derive(Debug)]
 pub struct InputAction<'a> {
@@ -152,7 +153,7 @@ impl InputFactory {
             return Some(InputAction::new(ret, &self.ev_device))
         }
 
-        log(&format!("touch['{iden}'] not found"));
+        error!("touch['{iden}'] not found");
         None
     }
 }

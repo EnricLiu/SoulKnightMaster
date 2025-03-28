@@ -18,16 +18,17 @@ use axum::body::Bytes;
 use axum::http::HeaderMap;
 use axum::extract::Query;
 use axum::response::{Html, Response};
+use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::{FrameBuffer, NodeConfig};
 use crate::CLUSTER;
-use crate::utils::log;
 use model::{
     GetFbParams, PostActionParam, ScheduleParams,
     // DropNodeParam, NewNodeParam,
 };
 use response::{DefaultResponse, ErrResponse};
+use crate::server::model::GetStatusParams;
 
 static TEST_PNG: LazyLock<FrameBuffer> = LazyLock::new(|| {
     let reader = ImageReader::open("res/test_big.png").unwrap();
@@ -43,6 +44,7 @@ pub fn route() -> Router {
         .route("/fb", get(get_fb))
         .route("/action", post(post_action))
         
+        .route("/status", get(get_status))
         .route("/all_node", get(get_all_nodes))
         // .route("/new_node", post(post_new_node))
         // .route("/drop_node", post(post_drop_node))
@@ -62,7 +64,7 @@ async fn get_fb(
     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
     Query(query): Query<GetFbParams>,
 ) -> Response {
-    log(&format!("<GET> framebuffer: {:?}", query));
+    debug!("<GET> framebuffer: {:?}", query);
     let node_name = query.node();
 
     match CLUSTER.get_fb_by_name(node_name).await {
@@ -110,12 +112,22 @@ async fn post_action(
 //         &params.node(), CLUSTER.drop_node(&params.node()).await.map(|_| None)).into_response()
 // }
 
+async fn get_status(
+    ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+    Query(query): Query<GetStatusParams>,
+) -> Response {
+    let node = query.node();
+    match CLUSTER.get_status_by_name(node) {
+        Ok(status) => { Json::from(status).into_response() },
+        Err(e) => { ErrResponse::from(e).into_response() }
+    }
+}
 
 async fn get_all_nodes(
     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
     let devices = CLUSTER.all_devices();
-    log(&format!("<GET> all_devices: {:?}", devices));
+    debug!("<GET> all_devices: {:?}", devices);
     Json::from(devices)
 }
 

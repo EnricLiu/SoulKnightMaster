@@ -4,13 +4,26 @@ mod server;
 mod cluster;
 pub mod node;
 
-use dashmap::DashMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::{Arc, LazyLock};
+use log::{trace, info, log_enabled, Level};
+
+use chrono::Local;
+use dashmap::DashMap;
+use serde_json::from_str;
+use tokio::sync::{broadcast, watch};
 use adb_client::{ADBDeviceExt, ADBServer};
-use tokio::sync::watch;
+
 use crate::node::Node;
-use crate::cluster::{Cluster, NodeConfig, NodeError, NodeWatcherSignal, ServerConfig};
+use crate::cluster::{
+    Cluster,
+    NodeConfig,
+    NodeError,
+    NodeSignal,
+    NodeWatcherSignal,
+    ServerConfig,
+    SoulKnightAction
+};
 
 static ADB_SERVER_DEFAULT_IP: LazyLock<SocketAddrV4> = LazyLock::new(|| {
     SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5037)
@@ -25,25 +38,41 @@ static ADB_SERVERS: LazyLock<DashMap<SocketAddrV4, ADBServer>> = LazyLock::new(|
 static SECRET: &str = include_str!("../configs/secret.txt");
 static SERVER_CONFIGS: LazyLock<Vec<ServerConfig>> = LazyLock::new(|| {
     let configs = include_str!("../configs/server.json");
-    serde_json::from_str(configs).expect("parse server configs error")
+    from_str(configs).expect("parse server configs error")
 });
 static CLUSTER: LazyLock<Arc<Cluster>>
     = LazyLock::new(|| Arc::new(Cluster::new(SERVER_CONFIGS.clone())));
 
 #[tokio::main]
 async fn main() -> Result<(), Box::<dyn std::error::Error>> {
-    use serde_json::from_str;
+    let log_path = format!("./log/{}.log", Local::now().format("%Y%m%d-%H%M%S"));
+    
+    fern::Dispatch::new()
+        .level(log::LevelFilter::Info)
+        .chain(std::io::stderr())
+        .chain(fern::log_file(log_path)?)
+        .format(move |out, message, record| {
+            out.finish(format_args!(
+                "[{}] [{}] {}: {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .apply()?;
+
+    trace!("starting...");
     
     let node_configs: Vec<NodeConfig> = from_str(include_str!("../configs/node.json"))?;
     // CLUSTER.new_node(node_configs.get(0).expect("no node configs").clone()).await?;
     for node_config in node_configs {
-        println!("new node: {:?}", node_config);
         CLUSTER.new_node(node_config).await.expect("new node error");
     }
     
     let app = server::route();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:55555").await?;
-    println!("listening on {}", listener.local_addr()?);
+    info!("listening on {}", listener.local_addr()?);
     axum::serve(listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     ).await?;
@@ -65,17 +94,21 @@ async fn test() -> Result<(), NodeError> {
     let config = configs.get(0).unwrap();
 
     let node: Node<16> = Node::new(config.clone(), "127.0.0.1:5037".parse().unwrap());
-    let mut watcher: watch::Receiver<NodeWatcherSignal> = node.watch();
+    let mut logger: broadcast::Receiver<NodeWatcherSignal> = node.watch();
     tokio::spawn(async move {
-        while watcher.changed().await.is_ok() {
-            let signal = watcher.borrow().clone();
+        while let Ok(signal) = logger.recv().await {
+            println!("[Logger]");
             match signal {
                 NodeWatcherSignal::Error {node_name, err } => {
                     println!("[Error] Node[{node_name}]: {err}");
                 }
+                NodeWatcherSignal::Ready {node_name} => {
+                    println!("[Ready] Node[{node_name}]")
+                }
                 _ => {}
             }
         }
+        println!("[FATAL] Logger Down.");
     });
 
     let _handle = node.schedule().await?;
@@ -84,8 +117,8 @@ async fn test() -> Result<(), NodeError> {
     for i in 0..100 {
         interval.tick().await;
         // let action = Action::new(i, Some(i as f64 * pi / 4f64), true, true, true);
-        let action = SoulKnightAction::new(i, None, true, false, false);
-        // let action = Action::new(i, Some(i as f64 * pi / 4f64), false, false, false);
+        // let action = SoulKnightAction::new(i, None, true, false, false);
+        let action = SoulKnightAction::new(i, Some(i as f64 * pi / 4f64), false, false, false);
         node.act(NodeSignal::Action(action)).await.expect("???");
         
         
@@ -98,40 +131,40 @@ async fn test() -> Result<(), NodeError> {
     Ok(())
 }
 
-#[tokio::test]
-async fn test_deschedule() -> Result<(), NodeError> {
-    let configs: Vec<NodeConfig> = serde_json::from_str(include_str!("../configs/node.json")).unwrap();
-    let config = configs.get(0).unwrap();
-
-    let node: Node<16> = Node::new(config.clone(), "127.0.0.1:5037".parse().unwrap());
-    let mut watcher: watch::Receiver<NodeWatcherSignal> = node.watch();
-    tokio::spawn(async move {
-        while watcher.changed().await.is_ok() {
-            let signal = watcher.borrow().clone();
-            match signal {
-                NodeWatcherSignal::Error {node_name, err } => {
-                    println!("[Error] Node[{node_name}]: {err}");
-                }
-                _ => {}
-            }
-        }
-    });
-    
-    println!("start");
-    node.schedule().await?;
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    println!("stop");
-    node.deschedule().await?;
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    println!("start");
-    node.schedule().await?;
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    println!("stop");
-    node.deschedule().await?;
-    println!("ok!");
-    
-    Ok(())
-}
+// #[tokio::test]
+// async fn test_deschedule() -> Result<(), NodeError> {
+//     let configs: Vec<NodeConfig> = serde_json::from_str(include_str!("../configs/node.json")).unwrap();
+//     let config = configs.get(0).unwrap();
+// 
+//     let node: Node<16> = Node::new(config.clone(), "127.0.0.1:5037".parse().unwrap());
+//     let mut watcher: watch::Receiver<NodeWatcherSignal> = node.watch();
+//     tokio::spawn(async move {
+//         while watcher.changed().await.is_ok() {
+//             let signal = watcher.borrow().clone();
+//             match signal {
+//                 NodeWatcherSignal::Error {node_name, err } => {
+//                     println!("[Error] Node[{node_name}]: {err}");
+//                 }
+//                 _ => {}
+//             }
+//         }
+//     });
+//     
+//     println!("start");
+//     node.schedule().await?;
+//     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+//     println!("stop");
+//     node.deschedule().await?;
+//     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+//     println!("start");
+//     node.schedule().await?;
+//     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+//     println!("stop");
+//     node.deschedule().await?;
+//     println!("ok!");
+//     
+//     Ok(())
+// }
 
 // #[tokio::main]
 // async fn main() -> Result<(), crate::adb::error::Error> {

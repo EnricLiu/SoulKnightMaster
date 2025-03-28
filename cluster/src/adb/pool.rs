@@ -3,10 +3,10 @@ use std::net::SocketAddrV4;
 use std::str::FromStr;
 use std::sync::Arc;
 use adb_client::ADBServerDevice;
+use log::trace;
 use tokio::sync::{Mutex};
 
 use crate::adb::error::Error;
-use crate::utils::log;
 
 pub struct DeviceConnPool<const MAX_POOL_SIZE: usize> {
     conns: Mutex<VecDeque<Arc<ADBServerDevice>>>,
@@ -39,7 +39,8 @@ impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
     
     pub async fn connect(&self) -> Result<(), Error> {
         let mut conns = self.conns.lock().await;
-        for _ in 0..MAX_POOL_SIZE {
+        if conns.len() >= MAX_POOL_SIZE { return Ok(()) }
+        for _ in 0..MAX_POOL_SIZE - conns.len() {
             let conn = self.make_conn().await;
             conns.push_back(conn);
         }
@@ -71,7 +72,7 @@ impl<const MAX_POOL_SIZE: usize> DeviceConnPool<MAX_POOL_SIZE> {
         let mut conns = self.conns.lock().await;
         if conns.len() < MAX_POOL_SIZE {
             conns.push_back(conn);
-            log("GIVEN BACK!!");
+            trace!("GIVEN BACK!!");
         }
     }
     
