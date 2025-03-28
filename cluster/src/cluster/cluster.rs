@@ -121,9 +121,16 @@ impl Cluster {
     
     pub async fn schedule_node(&self, name: &str) -> Result<(), Error> {
         if let Some(node) = self.nodes.get(name) {
-            node.value().schedule().await?;
-            info!("Node[{name}] scheduled.");
-            Ok(())
+            let node = node.value();
+            if let Some(mut server) = self.servers.get_mut(node.get_server_name()) {
+                server.value_mut().connect_node_by_addr(node.get_iden())?;
+                node.schedule().await?;
+                info!("Node[{name}] scheduled.");
+                Ok(())
+            } else {
+                Err(Error::ServerNotFound(node.get_server_name().to_string()))
+            }
+            
         } else {
             Err(Error::NodeNotFound(name.to_string()))
         }

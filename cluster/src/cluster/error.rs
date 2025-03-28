@@ -11,6 +11,9 @@ pub enum Error {
     
     #[error("adb {0} not found")]
     NodeNotFound(String),
+
+    #[error("adb server {0} not found")]
+    ServerNotFound(String),
     
     #[error("adb {0} already exists")]
     NodeAlreadyExist(String),

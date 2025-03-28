@@ -91,7 +91,7 @@ pub struct Node<const POOL_SIZE: usize> {
 }
 
 impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
-    const FB_INTERVAL_MS: u64 = 250; //ms
+    const FB_INTERVAL_MS: u64 = 50; //ms
     const STATUS_INTERVAL_MS: u64 = 500; //ms
     const FB_GUARD_INTERVAL_MS: u64 = 15; //s
     
@@ -129,8 +129,12 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
         self.status.snap()
     }
     
-    pub fn config(&self) -> &Arc<NodeConfig> {
-        &self.config
+    pub fn get_server_name(&self) -> &'static str {
+        self.config.server()
+    }
+    
+    pub fn get_iden(&self) -> &'static str {
+        self.config.iden()
     }
     
     pub fn watch(&self) -> broadcast::Receiver<NodeWatcherSignal> {
@@ -318,9 +322,11 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
             let _stop_flag = stop_flag.clone();
             let _fb_task_: JoinHandle<Result<(), NodeError>> = tokio::spawn(async move {
                 let __device = _device.clone();
+                let mut interval = tokio::time::interval(Duration::from_millis(Self::FB_INTERVAL_MS));
                 loop {
                     if _stop_flag.load(Ordering::SeqCst) { break }
                     _status.task_start();
+                    interval.tick().await;
                     let res = tokio::time::timeout(
                         Duration::from_millis(500),
                         async {
@@ -439,7 +445,10 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                 let mut interval = tokio::time::interval(Duration::from_millis(Self::STATUS_INTERVAL_MS));
                 let mut fb_cnt = _fb_sn.load(Ordering::SeqCst);
                 loop {
-                    if _stop_flag.load(Ordering::SeqCst) { break }
+                    if _stop_flag.load(Ordering::SeqCst) {
+                        _status.set_fps(0.0);
+                        break;
+                    }
                     interval.tick().await;
                     _status.set_thread(_device.pool_len().await);
                     let new_fn_sn = _fb_sn.load(Ordering::SeqCst);
