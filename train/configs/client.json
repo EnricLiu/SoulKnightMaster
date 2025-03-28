@@ -293,6 +293,10 @@
                 "action": "detect",
                 "ckpt": "portal",
                 "timeout": 3
+            },
+            {
+                "action": "wait",
+                "time": 5
             }
 
         ]
