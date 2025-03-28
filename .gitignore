@@ -22,6 +22,20 @@ maafw_test/debug
 
 tools/psd_parser/res
 
+tmp
+
+ckpt
+ckpts
+pretrain
+
+log
+logs
+
+runs
+wandb
+
+*.zip
+
 # conda env
 workenv
 
