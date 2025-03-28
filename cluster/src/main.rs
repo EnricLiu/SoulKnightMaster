@@ -44,7 +44,7 @@ static CLUSTER: LazyLock<Arc<Cluster>>
     = LazyLock::new(|| Arc::new(Cluster::new(SERVER_CONFIGS.clone())));
 
 #[tokio::main]
-async fn main() -> Result<(), Box::<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_path = format!("./log/{}.log", Local::now().format("%Y%m%d-%H%M%S"));
     
     fern::Dispatch::new()

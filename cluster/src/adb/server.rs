@@ -1,5 +1,5 @@
 use std::net::SocketAddrV4;
-use adb_client::{ADBServer, DeviceShort};
+use adb_client::{ADBServer, DeviceShort, RustADBError};
 use crate::cluster::ServerConfig;
 use crate::cluster::{Error, ServerError};
 
@@ -29,9 +29,22 @@ impl Server {
     }
     
     pub fn connect_node_by_addr(&mut self, iden: &str) -> Result<(), ServerError> {
+        println!("Server[{}]: connect node by iden[{}]", self.name, iden);
         if let Err(e) = self.check_node_by_iden(iden) {
             if let ServerError::DeviceNotConnected(_) = e {
                 self.server.connect_device(iden.parse().unwrap())?;
+
+                if let Err(e) = self.server.connect_device(iden.parse().unwrap()) {
+                    return if let RustADBError::ADBRequestFailed(err) = e {
+                        if err == format!("already connected to {}", iden) {
+                            Ok(())
+                        } else {
+                            Err(RustADBError::ADBRequestFailed(err).into())
+                        }
+                    } else {
+                        Err(e.into())
+                    }
+                }
             }
         }
         Ok(())
