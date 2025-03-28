@@ -1,12 +1,16 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use axum::http::Response;
 use dashmap::DashMap;
+use log::{debug, error, info};
+use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 use crate::cluster::model::NodeSignal;
 use crate::adb::server::Server;
 use super::config::{NodeConfig, ServerConfig};
 use super::error::{Error, ServerError};
 use crate::node::{Node, NodeStatus};
-use crate::cluster::{SoulKnightAction, FrameBuffer, NodeError};
+use crate::cluster::{SoulKnightAction, FrameBuffer, NodeError, NodeWatcherSignal};
 use crate::utils::Position;
 
 pub struct Cluster {
@@ -14,6 +18,7 @@ pub struct Cluster {
     nodes: DashMap<String, Node<12>>,
     // name -> ADBServer
     servers: DashMap<String, Server>,
+    loggers: DashMap<String, JoinHandle<Result<(), Error>>>
 }
 
 impl Debug for Cluster {
@@ -30,6 +35,7 @@ impl Cluster {
         let ret = Cluster {
             nodes: DashMap::new(),
             servers: DashMap::new(),
+            loggers: DashMap::new()
         };
         
         for config in server_configs {
@@ -39,6 +45,12 @@ impl Cluster {
         };
         
         ret
+    }
+    
+    pub fn get_status_by_name(&self, name: &str) -> Result<NodeStatus, Error> {
+        self.nodes.get(name)
+            .map(|node| node.value().get_status())
+            .ok_or(Error::NodeNotFound(name.to_string()))
     }
     
     pub fn all_devices(&self) -> Vec<NodeStatus> {
@@ -51,6 +63,7 @@ impl Cluster {
     
     pub async fn act_by_name(&self, name: &str, action: NodeSignal) -> Result<(), Error> {
         if let Some(node) = self.nodes.get(name) {
+            debug!("Node[{name}]: {:?}", &action);
             match node.value().act(action).await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(Error::NodeError(e))
@@ -71,20 +84,45 @@ impl Cluster {
                 Err(ServerError::ServerNotFound(server_name.to_string()))
             }?;
         
-        let name = config.name().to_string();
-        if self.nodes.get(&name).is_some() {
-            return Err(Error::NodeAlreadyExist(name));
+        let name = config.name();
+        let name_string = name.to_string();
+        if self.nodes.get(name).is_some() {
+            return Err(Error::NodeAlreadyExist(name_string));
         }
         
         let node = Node::new(config, server_addr);
-        self.nodes.insert(name.clone(), node);
-        
-        Ok(name)
+        self.loggers.insert(name_string.clone(), self.make_logger(name, node.watch()));
+
+
+        self.nodes.insert(name_string.clone(), node);
+        Ok(name_string)
+    }
+    
+    fn make_logger(
+        &self, name: &'static str, mut logger: broadcast::Receiver<NodeWatcherSignal>
+    ) -> JoinHandle<Result<(), Error>> {
+        let handle = tokio::spawn(async move {
+            while let Ok(signal) = logger.recv().await {
+                match signal {
+                    NodeWatcherSignal::Error {node_name, err } => {
+                        error!("Node[{node_name}]: {err}");
+                    }
+                    NodeWatcherSignal::Ready {node_name} => {
+                        info!("Node[{node_name}] Ready.")
+                    }
+                    _ => {}
+                }
+            }
+            error!("Node[{name}] logger down.");
+            Err(Error::NodeError(NodeError::NodeLoggerDown{ name }))
+        });
+        handle
     }
     
     pub async fn schedule_node(&self, name: &str) -> Result<(), Error> {
         if let Some(node) = self.nodes.get(name) {
             node.value().schedule().await?;
+            info!("Node[{name}] scheduled.");
             Ok(())
         } else {
             Err(Error::NodeNotFound(name.to_string()))
@@ -94,6 +132,7 @@ impl Cluster {
     pub async fn deschedule_node(&self, name: &str) -> Result<(), Error> {
         if let Some(node) = self.nodes.get(name) {
             node.value().deschedule().await?;
+            info!("Node[{name}] descheduled.");
             Ok(())
         } else {
             Err(Error::NodeNotFound(name.to_string()))

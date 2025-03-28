@@ -32,6 +32,16 @@ impl GetFbParams {
 //     }
 // }
 
+#[derive(Debug, Deserialize)]
+pub struct GetStatusParams {
+    node: String,
+}
+impl GetStatusParams {
+    pub fn node(&self) -> &str {
+        &self.node
+    }
+}
+
 # [derive(Debug, Deserialize)]
 pub struct ScheduleParams {
     node: String,

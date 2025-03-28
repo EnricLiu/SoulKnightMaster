@@ -51,6 +51,9 @@ pub enum NodeError {
     #[error("Node[{name}] Task can not join")]
     NodeTaskCanNotJoin{ name: &'static str },
     
+    #[error("Node[{name}] Logger Down")]
+    NodeLoggerDown{ name: &'static str },
+    
     #[error("{0}")]
     Custom(String),
 }
