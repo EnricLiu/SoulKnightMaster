@@ -5,6 +5,9 @@ import numpy as np
 from PIL import Image
 from PIL.Image import Image as _Image
 
+import psutil
+import subprocess
+
 from httb import Client as httb
 from utils import Action
 from utils import Position
@@ -25,12 +28,39 @@ class Client:
             "action":   action.__dict__(),
         }]
         res = self.client.post(url, json=payload)
-        return res.status_code()
+        
+        if res.status_code() != 200:
+            if res.json().get("type", None) is None or res.json().get("msg", None) is None:
+                raise res.text()
+        return res.json()
+    
+    def deschedule(self):
+        url = f"{self.url}/deschedule?node={self.node_name}"
+        res = self.client.get(url)
+        if res.status_code() != 200:
+            if res.json().get("type", None) is None or res.json().get("msg", None) is None:
+                raise res.text()
+        return res.json()
+    
+    def schedule(self):
+        url = f"{self.url}/schedule?node={self.node_name}"
+        res = self.client.get(url)
+        if res.status_code() != 200:
+            if res.json().get("type", None) is None or res.json().get("msg", None) is None:
+                raise res.text()
+        return res.json()
     
     def fetch_fb(self) -> np.ndarray:
         res = self.client.get(f"{self.url}/fb?node={self.node_name}")
         return np.frombuffer(res.content(), dtype=np.uint8).reshape(720, 1280, 4)[:,:,:3]
 
+    def fetch_status(self):
+        res = self.client.get(f"{self.url}/status?node={self.node_name}")
+        if res.status_code() != 200:
+            if res.json().get("type", None) is None or res.json().get("msg", None) is None:
+                raise res.text()
+        return res.json()
+    
     def sync_click(self, pos: Position):
         url = f"{self.url}/action"
         payload = [{
@@ -45,7 +75,10 @@ class Client:
         }]
         res = self.client.post(url, json=payload)
         # print(res.response)
-        return res.status_code()
+        if res.status_code() != 200:
+            if res.json().get("type", None) is None or res.json().get("msg", None) is None:
+                raise res.text()
+        return res.json()
 
 
 class AutoPilotClient(Client):
@@ -145,7 +178,32 @@ class AutoPilotClient(Client):
                 is_good =True
 
         return act_type, is_good
-
+    
+    def _reboot(self):
+        for proc in [proc for proc in psutil.process_iter(['name']) if proc.info['name'] == "MuMuPlayer.exe"]:
+            proc.terminate()
+            proc.wait(timeout=5)
+        subprocess.Popen("MuMuPlayer.exe -v 2") 
+    
+    def check_status(self):
+        res = self.fetch_status()
+        match res.get("status", "DEAD"):
+            case "DEAD":
+                res = self.deschedule()
+                if not res.get("success", False): 
+                    raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
+                res = self._reboot()
+                res = self.try_task("emu_reboot")
+                if not res: 
+                    raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
+                res = self.schedule()
+                if not res.get("success", False): 
+                    raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
+                res = self.fetch_status()
+                if res.get("status", "DEAD") not in ["RUNNING", "IDLE"]: 
+                    raise Exception(f"[EnvStep] Client[{self.node_name}] DEAD and not reboot😭!")
+            case "DISCONNECTED" | "STOPPED": 
+                raise Exception(f"[EnvStep] Client[{self.node_name}] not connected😡!")
 
     def try_task(self, task_name, timeout=45, max_retry=3):
         task = self.task_flow[task_name]
@@ -185,12 +243,13 @@ if __name__ == "__main__":
     config = json.load(open("./configs/client.json"))
     client = AutoPilotClient("SKM_16448", config)
     
+    print(client.sync_click(Position(1,2)))
     # client.try_task("restart")
     
-    while True:
-        res, distance = client._detect_ckpt("portal", timeout=0.25)
-        print(res, distance)
-        time.sleep(0.25)
+    # while True:
+    #     res, distance = client._detect_ckpt("portal", timeout=0.25)
+    #     print(res, distance)
+    #     time.sleep(0.25)
     # client.sync_action("SKM_16448", Action(None, False, False, False))
     
     # client.sync_action(Action(pi/2, False, False, False))
