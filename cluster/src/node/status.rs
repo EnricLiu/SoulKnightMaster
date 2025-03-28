@@ -26,6 +26,7 @@ impl From<u8> for NodeStatusCode {
 pub struct AtomicNodeStatus {
     name:           &'static str,
     status:         AtomicU8,
+    fps:            AtomicU64,
     task_cnt:       AtomicU64,
     total_thread:   AtomicU64,
     free_thread:    AtomicU64,
@@ -36,8 +37,9 @@ impl AtomicNodeStatus {
         AtomicNodeStatus {
             name,
             status:         AtomicU8::new(NodeStatusCode::DISCONNECTED as u8),
+            fps:            AtomicU64::new(0),
             task_cnt:       AtomicU64::new(0),
-            free_thread:    AtomicU64::new(0),
+            free_thread:    AtomicU64::new(total as u64),
             total_thread:   AtomicU64::new(total as u64),
         }
     }
@@ -48,6 +50,10 @@ impl AtomicNodeStatus {
     
     pub fn set_thread(&self, used: usize) {
         self.free_thread.store(used as u64, Ordering::SeqCst);
+    }
+    
+    pub fn set_fps(&self, fps: f64) {
+        self.fps.store(fps.to_bits(), Ordering::SeqCst);
     }
     
     pub fn task_start(&self) {
@@ -61,6 +67,7 @@ impl AtomicNodeStatus {
     pub fn snap(&self) -> NodeStatus {
         NodeStatus {
             name:           self.name,
+            fps:            f64::from_bits(self.fps.load(Ordering::SeqCst)),
             status:         self.status.load(Ordering::SeqCst).into(),
             task_cnt:       self.task_cnt.load(Ordering::SeqCst) as usize,
             free_thread:    self.free_thread.load(Ordering::SeqCst) as usize,
@@ -73,6 +80,7 @@ impl AtomicNodeStatus {
 pub struct NodeStatus {
     pub name:           &'static str,
     pub status:         NodeStatusCode,
+    pub fps:            f64,
     pub task_cnt:       usize,
     pub free_thread:    usize,
     pub total_thread:   usize,
@@ -80,13 +88,7 @@ pub struct NodeStatus {
 
 impl From<AtomicNodeStatus> for NodeStatus {
     fn from(atomic: AtomicNodeStatus) -> Self {
-        NodeStatus {
-            name:   atomic.name,
-            status: atomic.status.load(Ordering::SeqCst).into(),
-            task_cnt:       atomic.task_cnt.load(Ordering::SeqCst) as usize,
-            free_thread:    atomic.free_thread.load(Ordering::SeqCst) as usize,
-            total_thread:   atomic.total_thread.load(Ordering::SeqCst) as usize,
-        }
+        atomic.snap()
     }
 }
 
