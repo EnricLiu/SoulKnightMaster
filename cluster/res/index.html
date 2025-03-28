@@ -251,6 +251,34 @@
 
         const nodesContainer = document.getElementById('nodes-container');
 
+        const fetchSchedule = async (nodeName) => {
+            return new Promise((resolve, reject) => {
+                fetch(`/schedule?node=${nodeName}`)
+                    .then(res => res.json())
+                    .then(res => {
+                        resolve(res?.success ?? false)
+                    })
+                    .catch(err => {
+                        console.error(err)
+                        reject(err)
+                    })
+            })
+        }
+
+        const fetchDeSchedule = async (nodeName) => {
+            return new Promise((resolve, reject) => {
+                fetch(`/deschedule?node=${nodeName}`)
+                    .then(res => res.json())
+                    .then(res => {
+                        resolve(res?.success ?? false)
+                    })
+                    .catch(err => {
+                        console.error(err)
+                        reject(err)
+                    })
+            })
+        }
+
         const refreshNodes = async () => {
             return new Promise((resolve, reject) => {
                 fetch("/all_node")
@@ -264,6 +292,8 @@
                                 name:       node.name,
                                 threads:    node.total_thread,
                                 pending:    node.task_cnt,
+                                fps:        node.fps,
+                                status:     node.status,
                                 usage,
                             }
                         })
@@ -279,11 +309,12 @@
         function initializeNodeCards() {
             nodesContainer.innerHTML = nodes.map((node, index) => {
                 const usageGradient = getUsageGradient(node.usage);
+                const usageColor = node.status === "RUNNING" ? (node.usage >= 80 ? 'bg-red-500' : 'bg-green-500') : "bg-gray-500";
                 return `
                     <div id="node-card-${node.id}" class="node-card bg-white rounded-lg border border-gray-200 p-3 shadow-md hover:shadow-lg transition-all duration-200">
                         <div class="flex items-center justify-between mb-2">
                             <div class="flex items-center">
-                                <div id="node-status-${node.id}" class="w-2 h-2 ${node.usage >= 80 ? 'bg-red-500' : 'bg-green-500'} rounded-full mr-2"></div>
+                                <div id="node-status-${node.id}" class="w-2 h-2 ${usageColor} rounded-full mr-2"></div>
                                 <h3 class="font-medium text-gray-900 text-sm">${node.name}</h3>
                             </div>
                             <span class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-geist-mono text-gray-500">NODE ${node.id}</span>
@@ -301,12 +332,26 @@
                         
                         <div class="flex justify-between">
                             <div>
-                                <div class="text-xs text-gray-500 mb-0.5">Active Threads</div>
-                                <div class="text-lg font-medium">${node.threads}</div>
+                                <span class="text-xs text-gray-500 mb-0.5">Current FPS</span>
+                                <span id="node-fps-${node.id}" class="text-lg font-medium">${node.fps}</span>
                             </div>
                             <div class="text-right">
-                                <div class="text-xs text-gray-500 mb-0.5">Pending Tasks</div>
-                                <div id="node-pending-${node.id}" class="text-lg font-medium">${node.pending}</div>
+                                <span class="text-xs text-gray-500 mb-0.5">Pending Tasks</span>
+                                <span id="node-pending-${node.id}" class="text-lg font-medium">${node.pending}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between mt-3">
+                            <div id="node-schedule_btn-${node.id}"
+                                class="px-2 py-1 rounded cursor-pointer bg-red-500 hover:bg-opacity-75 transition-colors"
+                                onclick="schedule(${node.id})">
+                                <span id="node-schedule_btn_text-${node.id}" class=" text-gray-200 font-medium">Deschedule</span>
+                            </div>
+
+                            <div id="node-updatefb_btn-${node.id}"
+                                class="px-2 py-1 ml-3 rounded cursor-pointer bg-green-500 hover:bg-opacity-75 transition-colors"
+                                onclick="updateFb(${node.id})">
+                                <span class=" text-gray-200 font-medium">CheckFrame</span>
                             </div>
                         </div>
                     </div>
@@ -320,20 +365,37 @@
                 const usageValue = document.getElementById(`node-usage-value-${node.id}`);
                 const statusIndicator = document.getElementById(`node-status-${node.id}`);
                 const pendingTasks = document.getElementById(`node-pending-${node.id}`);
+                const fps = document.getElementById(`node-fps-${node.id}`);
+                const scheduleBtn = document.getElementById(`node-schedule_btn-${node.id}`);
+                const scheduleBtnText = document.getElementById(`node-schedule_btn_text-${node.id}`);
+                const updateFbBtn = document.getElementById(`node-updatefb_btn-${node.id}`);
 
-                if (usageBar && usageValue && statusIndicator && pendingTasks) {
+                if (usageBar && usageValue && statusIndicator && pendingTasks && fps) {
                     const usageGradient = getUsageGradient(node.usage);
 
                     usageValue.textContent = `${node.usage.toFixed(1)}%`;
                     pendingTasks.textContent = node.pending;
+                    fps.textContent = node.fps;
 
-                    if (node.usage >= 80) {
-                        statusIndicator.classList.remove('bg-green-500');
-                        statusIndicator.classList.add('bg-red-500');
-                    } else {
-                        statusIndicator.classList.remove('bg-red-500');
-                        statusIndicator.classList.add('bg-green-500');
-                    }
+                    const usageColor =
+                        node.status === "RUNNING"
+                            ? (node.usage >= 80 ? 'bg-red-500'
+                            : 'bg-green-500') : 'bg-gray-500';
+
+                    for(let i of ['bg-green-500', 'bg-red-500', 'bg-gray-500'])
+                        statusIndicator.classList.remove(i);
+                    statusIndicator.classList.add(usageColor);
+
+                    const scheduleBtnColor = node.status === "RUNNING" ? 'bg-red-500' : 'bg-green-500';
+                    for(let i of ['bg-red-500', 'bg-green-500'])
+                        scheduleBtn.classList.remove(i);
+                    scheduleBtn.classList.add(scheduleBtnColor);
+                    scheduleBtnText.textContent = node.status === "RUNNING" ? "Deschedule" : "Schedule";
+
+                    const updateFbBtnColor = node.status === "RUNNING" ? 'bg-green-500' : 'bg-gray-500';
+                    for(let i of ['bg-green-500', 'bg-gray-500'])
+                        updateFbBtn.classList.remove(i);
+                    updateFbBtn.classList.add(updateFbBtnColor);
 
                     usageBar.classList.remove('gradient-green', 'gradient-yellow', 'gradient-red');
                     usageBar.classList.add(usageGradient);
@@ -343,6 +405,16 @@
                     }, 10);
                 }
             });
+        }
+
+        const schedule = async (nodeId) => {
+            const nodeName = nodes.find(node => node.id === nodeId).name;
+            const isScheduled = nodes.find(node => node.id === nodeId).status === "RUNNING";
+            if (isScheduled) {
+                const res = await fetchDeSchedule(nodeName);
+            } else {
+                const res = await fetchSchedule(nodeName);
+            }
         }
 
         async function updateNodeData() {
