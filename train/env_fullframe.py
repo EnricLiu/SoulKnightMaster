@@ -77,9 +77,8 @@ class SoulKnightEnv(gym.Env):
         # is_move[0-1], move_angle[0-255], is_attack[0-1], is_skill[0-1]
         # self.action_space = gym.spaces.MultiDiscrete([2, 256, 2, 2])
         self.action_space = gym.spaces.Box(
-            low =   -1000000,
-            high =   1000000,
-            shape = (4,),
+            low  = np.array([0.0, -1.0,  0.0,  0.0]),
+            high = np.array([1.0,  1.0,  1.0,  1.0]),
             dtype = np.float32
         )
         self.running_timer = 0

@@ -13,8 +13,6 @@ from model_fullframe import ActorModel as FeatureExtractor, ValueModel
 from env_fullframe import SoulKnightEnv
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-CKPT_PATH_COMBINE = Path("./pretrain/bn/1741430443-ln=skill-loss=8.477-e3.pth")
 STATE_CONFIG = {
     "region_coords": {
         "blood": (51, 11, 230, 36),
@@ -45,10 +43,11 @@ class SoulKnightMasterPolicy(ActorCriticPolicy):
                 "out_feature_dim": 1024
             },
             activation_fn=activation_fn,
-            optimizer_class=torch.optim.Adam,
+            optimizer_class=torch.optim.AdamW,
             optimizer_kwargs={
                 # "params":   filter(lambda p: p.requires_grad, self.parameters()),
-                "eps":      1e-5,
+                "eps":          1e-6,
+                "weight_decay": 1e-4
             },
             *args, **kwargs
         )
@@ -101,9 +100,10 @@ WANDB_CFG = json.load(open("./configs/wandb.json"))
 TRAIN_PARAMS = {
     "n_steps":          256,
     "batch_size":       2,
-    "learning_rate":    3e-4,
+    "learning_rate":    1e-6,
     "n_epochs":         1,
-    "ent_coef":         0.01,
+    "ent_coef":         0.1,
+    "target_kl":        0.05,
 }
 
 if not wandb.login(key=WANDB_CFG["secret"], relogin=True, timeout=5):

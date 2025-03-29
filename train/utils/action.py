@@ -34,9 +34,9 @@ class Action:
             raise ValueError("raw_action must be a 1-D array with shape (4,)")
         raw_action = raw_action.tolist()
         return Action(
-            angle  = raw_action[1] * math.pi if raw_action[0] > 0 else None,
-            attack = raw_action[2] > 0,
-            skill  = raw_action[3] > 0,
+            angle  = raw_action[1] * math.pi if raw_action[0] > 0.5 else None,
+            attack = raw_action[2] > 0.5,
+            skill  = raw_action[3] > 0.5,
             weapon = False
         )
     

@@ -16,18 +16,19 @@ class ActorModel(BaseFeaturesExtractor):
 
         self.train_label = train_label
         print("[ActorInit] loading model...")
-        weights = EfficientNet_V2_S_Weights.DEFAULT
+        # weights = EfficientNet_V2_S_Weights.DEFAULT
+        weights = None
         self.effi_net = efficientnet_v2_s(weights=weights)
         gru_in_dim = self.effi_net.classifier[1].in_features  # 1280 for EfficientNet V2 S
         self.effi_net.classifier = nn.Identity()  # Remove original classifier
         
         # frozen [0]-[5], [6: 0-9]
-        for i in range(6):
-            for param in self.effi_net.features[i].parameters():
-                param.requires_grad = False
-        for i in range(10):
-            for param in self.effi_net.features[6][i].parameters():
-                param.requires_grad = False
+        # for i in range(6):
+        #     for param in self.effi_net.features[i].parameters():
+        #         param.requires_grad = False
+        # for i in range(10):
+        #     for param in self.effi_net.features[6][i].parameters():
+        #         param.requires_grad = False
 
         # self.branches = nn.ModuleDict({
         #     label: nn.ModuleDict({
