@@ -151,6 +151,10 @@
                 "action": "detect",
                 "ckpt": "portal",
                 "timeout": 3
+            },
+            {
+                "action": "wait",
+                "time": 10
             }
         ],
         "portal": [
@@ -296,7 +300,7 @@
             },
             {
                 "action": "wait",
-                "time": 5
+                "time": 10
             }
 
         ]
