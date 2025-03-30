@@ -72,11 +72,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let app = server::route();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:55555").await?;
-    info!("listening on {}", listener.local_addr()?);
+    info!("listening on http://{}", listener.local_addr()?);
     axum::serve(listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     ).await?;
-    
     Ok(())
 }
 
