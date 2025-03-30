@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.nn.functional import avg_pool2d
 from torchvision import transforms
 
-from utils import Action, Position, SoulKnightMinimap
+from utils import Action, Position, SoulKnightMinimap, obj_detect
 from client import AutoPilotClient
 
 CKPT_PATH_COMBINE = Path("./pretrain/bn/1741430443-ln=skill-loss=8.477-e3.pth")
@@ -30,11 +30,12 @@ STATE_CONFIG = {
 }
 
 class SoulKnightEnv(gym.Env):
-    def __init__(self, device, autopilot_config: dict, minimap_config: dict, name:str, logger=None):
+    def __init__(self, device, autopilot_config: dict, minimap_config: dict, name:str, seq_len=10, logger=None):
         print("[EnvInit] initing parent...")
         super(SoulKnightEnv, self).__init__()
         
         print("[EnvInit] making client...")
+        self.seq_len = seq_len
         self.name = name
         self.logger = logger
         self.device = device
@@ -51,34 +52,41 @@ class SoulKnightEnv(gym.Env):
             "frames": gym.spaces.Box(
                 low =   -float("inf"),
                 high =   float("inf"),
-                shape = (10, 3, 180, 320),
+                shape = (self.seq_len, 2, 180, 320),
                 dtype = np.float32
             ),
             "minimap": gym.spaces.Box(
                 low =   -float("inf"),
                 high =   float("inf"),
-                shape = (10, 3, 5, 5),
+                shape = (self.seq_len, 3, 5, 5),
                 dtype = np.float32
             ),
             "health": gym.spaces.Box(
                 low =   -float("inf"),
                 high =   float("inf"),
-                shape = (10, 3),
+                shape = (self.seq_len, 3),
                 dtype = np.float32
             ),
         })
         
         print("[EnvInit] making obs frames...")
         self.obs = {
-            "frames":   torch.zeros((10, 3, 180, 320), dtype=torch.float32).to("cpu"),
-            "minimap":  torch.zeros((10, 3, 5, 5), dtype=torch.float32).to("cpu"),
-            "health":   torch.zeros((10, 3), dtype=torch.float32).to("cpu"),
+            "frames":   torch.zeros((self.seq_len, 2, 180, 320), dtype=torch.float32).to("cpu"),
+            "minimap":  torch.zeros((self.seq_len, 3, 5, 5), dtype=torch.float32).to("cpu"),
+            "health":   torch.zeros((self.seq_len, 3), dtype=torch.float32).to("cpu"),
         }
         # is_move[0-1], move_angle[0-255], is_attack[0-1], is_skill[0-1]
         # self.action_space = gym.spaces.MultiDiscrete([2, 256, 2, 2])
+        # self.action_space = gym.spaces.Box(
+        #     low  = np.array([0.0, -1.0,  0.0,  0.0]),
+        #     high = np.array([1.0,  1.0,  1.0,  1.0]),
+        #     dtype = np.float32
+        # )
+        
         self.action_space = gym.spaces.Box(
-            low  = np.array([0.0, -1.0,  0.0,  0.0]),
-            high = np.array([1.0,  1.0,  1.0,  1.0]),
+            low   = -1000000.0,
+            high  =  1000000.0,
+            shape = (4,),
             dtype = np.float32
         )
         self.running_timer = 0
@@ -168,7 +176,13 @@ class SoulKnightEnv(gym.Env):
         # frames
         new_frame = raw_frame.astype(np.float32)
         new_frame = torch.from_numpy(new_frame).to(self.device).permute(2, 0, 1).unsqueeze(0)   # [1, 3, 720, 1280]
-        new_frame = avg_pool2d(new_frame, kernel_size=4, stride=4)[0]                           # [3, 180, 320]
+        new_frame = avg_pool2d(new_frame, kernel_size=4, stride=4)[0] / 255.0                   # [3, 180, 320]
+        
+        bio_mask = obj_detect(raw_frame).astype(np.float32)
+        bio_mask = torch.from_numpy(bio_mask)           # grey scale  # [1, 180, 320]
+        gray_frame = new_frame.mean(dim=0).to("cpu")    # grey scale  # [1, 180, 320]
+        new_frame = torch.stack((gray_frame, bio_mask), dim=0)     # [2, 180, 320]
+        
         self.obs["frames"] = torch.roll(self.obs["frames"], shifts=1, dims=0)
         self.obs["frames"][-1] = new_frame.to("cpu")
         

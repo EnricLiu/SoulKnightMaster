@@ -1,4 +1,6 @@
 import torch
+
+import gymnasium as gym
 from torch import nn
 from stable_baselines3.common.policies import BaseFeaturesExtractor
 from torchvision.models import EfficientNet_B0_Weights, efficientnet_b0, EfficientNet_V2_S_Weights, efficientnet_v2_s
@@ -9,12 +11,18 @@ class ActorModel(BaseFeaturesExtractor):
     # def __init__(self, gru_hs=256, gru_layers=1, hardcode_hs=128, minimap_out_dim=64, health_out_dim=16,
     #              train_label=["move", "angle", "attack", "skill"]):
     
-    def __init__(self, obs_space, gru_hs=768, gru_layers=2, hardcode_hs=128, minimap_out_dim=64, health_out_dim=16, out_feature_dim=1024,
+    def __init__(self, obs_space: gym.Space, gru_hs=768, gru_layers=2, hardcode_hs=128, minimap_out_dim=64, health_out_dim=16, out_feature_dim=1024,
                 train_label=["move", "angle", "attack", "skill"]):
         print("[ActorInit] initing parent...")
         super(ActorModel, self).__init__(obs_space, out_feature_dim)
 
         self.train_label = train_label
+        
+        self.pre_effi_net = nn.Sequential(
+            nn.Conv2d(obs_space["frames"].shape[-3], 3, kernel_size=3, padding=1),
+            nn.ReLU(),
+        )
+        
         print("[ActorInit] loading model...")
         # weights = EfficientNet_V2_S_Weights.DEFAULT
         weights = None
@@ -60,6 +68,7 @@ class ActorModel(BaseFeaturesExtractor):
             nn.Linear(768, out_feature_dim)
         )
         
+        
         # --- 小地图处理子分支 ---
         self.map_cnn = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=2, padding=1),
@@ -86,11 +95,13 @@ class ActorModel(BaseFeaturesExtractor):
         print("[ActorInit] Finish!")
 
     def forward(self, obs):
-        # frame: (B, 10, 3, 90, 160), minimap: (B, 10, 3, 5, 5), health: (B, 10, 3)
+        # frame: (B, 10, 3, 180, 320), minimap: (B, 10, 3, 5, 5), health: (B, 10, 3)
         frame, minimap, health = obs["frames"], obs["minimap"], obs["health"]
         bs, seq_len, C, H, W = frame.shape
+        
         frame = frame.view(bs * seq_len, C, H, W)
-        frame_features = self.effi_net(frame)                   # [bs * seq_len, gru_in_dim]
+        tri_chn_frame = self.pre_effi_net(frame)                # [bs * seq_len, 3, 180, 320]
+        frame_features = self.effi_net(tri_chn_frame)           # [bs * seq_len, gru_in_dim]
         frame_features = frame_features.view(bs, seq_len, -1)   # [bs,  seq_len, gru_in_dim]
         
         bs, seq_len, C, H, W = minimap.shape
