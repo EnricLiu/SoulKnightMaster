@@ -97,13 +97,14 @@ class SoulKnightMasterPolicy(ActorCriticPolicy):
 import wandb
 from wandb.integration.sb3 import WandbCallback
 WANDB_CFG = json.load(open("./configs/wandb.json"))
+SEQ_LEN = 4
 TRAIN_PARAMS = {
     "n_steps":          256,
-    "batch_size":       2,
-    "learning_rate":    1e-6,
+    "batch_size":       4,
+    "learning_rate":    1e-4,
     "n_epochs":         1,
     "ent_coef":         0.1,
-    "target_kl":        0.05,
+    # "target_kl":        0.05,
 }
 
 if not wandb.login(key=WANDB_CFG["secret"], relogin=True, timeout=5):
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     print("Making Env")
     def make_sk_env(name):
         def _init():
-            return SoulKnightEnv("cuda", client_config, minimap_config, name=name, logger=RUN.log)
+            return SoulKnightEnv("cuda", client_config, minimap_config, name=name, seq_len=SEQ_LEN, logger=RUN.log)
         return _init
 
     env = DummyVecEnv([make_sk_env(name) for name in ["SKM_16448"]])
@@ -143,7 +144,7 @@ if __name__ == "__main__":
         model = PPO(SoulKnightMasterPolicy, env,
                     tensorboard_log=f"runs/{RUN.name}", verbose=2, device=DEVICE,
                     **TRAIN_PARAMS)
-        # model = PPO.load("./ckpt/fullframe_map_health/charmed-darkness-101-2025_03_18-15_28_09.zip",
+        # model = PPO.load("./ckpt/fullframe_map_health/happy-silence-173-2025_03_29-01_18_42/rl_model_188416_steps.zip",
         #                  env, tensorboard_log=f"runs/{RUN.name}", verbose=2,  **TRAIN_PARAMS)
         
         step_cnt = 0

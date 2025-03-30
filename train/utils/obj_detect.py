@@ -1,23 +1,20 @@
-import cv2 as cv
 import cv2
 import numpy as np
-from PIL import Image
-
-from position import Position
+from utils.position import Position
 
 from sklearn.cluster import DBSCAN
 
-
-def apply_filter(img, filters: dict[tuple[Position, Position]]) -> np.ndarray:
-    for _, f in filters.items():
-        tl, br = f
-        img[tl.x:br.x, tl.y:br.y] = 0
+def apply_filter(img: np.ndarray, filters: dict[tuple[Position, Position]], value=0) -> np.ndarray:
+    for tl, br in filters.values():
+        img[tl.x:br.x, tl.y:br.y] = value
     return img
 
-def obj_detect(fb):
+def obj_detect(fb) -> np.ndarray:
     # origin = cv2.cvtColor(fb.copy(), cv2.COLOR_RGB2BGR)
+    H, W, C = fb.shape
+    ret = np.zeros((H//4, W//4), dtype=np.uint8)
     
-    edges = (fb.mean(axis=2) < 4).astype(np.uint8) * 255
+    edges = (fb.mean(axis=2) < 5).astype(np.uint8) * 255
     edges = apply_filter(edges, {
         "level_num":  (Position(290, 1060), Position(320, 1130)),
         "level_desp": (Position(115, 1110), Position(145, 1210)),
@@ -26,6 +23,7 @@ def obj_detect(fb):
     })
     
     points = np.argwhere(edges > 0)[:, [1, 0]].astype(np.float32)
+    if len(points) == 0: return ret
     
     dbscan = DBSCAN(eps=3, min_samples=5)
     labels = dbscan.fit_predict(points)
@@ -33,54 +31,26 @@ def obj_detect(fb):
     contours = []
     for i in range(np.max(labels) + 1):
         mask = labels == i
-        if np.sum(mask) < 200: continue
+        if np.sum(mask) < 100: continue
         contours.append(points[mask])
     
-    objects = []
     for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        merged_x, merged_y, merged_w, merged_h = x, y, w, h
-        to_remove = []
-
-        for obj in objects:
-            obj_x, obj_y, obj_w, obj_h = obj['bounding_box']
-            
-            if not (merged_x + merged_w < obj_x or 
-                    merged_x > obj_x + obj_w or 
-                    merged_y + merged_h < obj_y or 
-                    merged_y > obj_y + obj_h):
-                
-                new_x = min(merged_x, obj_x)
-                new_y = min(merged_y, obj_y)
-                new_right = max(merged_x+merged_w, obj_x+obj_w)
-                new_bottom = max(merged_y+merged_h, obj_y+obj_h)
-                
-                merged_w = new_right - new_x
-                merged_h = new_bottom - new_y
-                merged_x, merged_y = new_x, new_y
-                
-                to_remove.append(obj)
-
-        for obj in to_remove:
-            objects.remove(obj)
-
-        objects.append({
-            'size': (merged_w, merged_h),
-            'bounding_box': (merged_x, merged_y, merged_w, merged_h),
-        })
+        if len(contour) < 200: continue
+        hull = cv2.convexHull(contour).astype(np.int32)
+        ret = cv2.fillConvexPoly(ret, hull//4, 1)
         
-    return objects
+    return ret
 
 if __name__ == "__main__":
     import time
-    from utils import Action
-    from train.client import Client
+    from client import Client
     
     client = Client("SKM_16448", ip="127.0.0.1", port="55555", timeout=1)
     # fb = client.fetch_fb()
-    
     # start = time.perf_counter()
-    # for i in range(200): obj_detect(fb)
+    # for i in range(200): 
+    #     print(i)
+    #     obj_detect(fb)
     # end = time.perf_counter()
     # print(f"{round((end-start) * 1000 / 200, 2)}ms")
     # exit()
@@ -88,14 +58,34 @@ if __name__ == "__main__":
     while True:
         fb = client.fetch_fb()
         try:
-            objects = obj_detect(fb.copy())
-            fb = cv2.cvtColor(fb, cv2.COLOR_RGB2BGR)
-            for obj in objects:
-                x, y, w, h = obj['bounding_box']
-                fb = cv2.rectangle(fb, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv.imshow('Clustered Edges', fb)
-            cv.waitKey(50)
+            start = time.perf_counter()
+            frame = obj_detect(fb)
+            print(f"{round((time.perf_counter() - start) * 1000, 2)}ms")
+            cv2.imshow('Clustered Edges', frame)
+            cv2.waitKey(5)
+            
+            # centers = obj_detect(fb.copy())
+            # fb = cv2.cvtColor(fb, cv2.COLOR_RGB2BGR)
+            # fb = cv2.resize(fb, (fb.shape[1] // 4, fb.shape[0] // 4))
+            # for center in centers:
+            #     x, y = center
+            #     cv2.circle(fb, (x, y), 5, (0, 0, 255), -1)
+            # cv2.imshow('Clustered Edges', fb)
+            # cv2.waitKey(5000)
+
+            # objects = obj_detect(fb.copy())
+            # fb = cv2.cvtColor(fb, cv2.COLOR_RGB2BGR)
+            # fb = cv2.resize(fb, (fb.shape[1] // 4, fb.shape[0] // 4))
+            # for obj in objects:
+            #     tl, br = obj
+            #     print(tl, br)
+            #     fb = cv2.rectangle(fb, (tl.x, tl.y), (br.x, br.y), (0, 255, 0), 2)
+                
+            # print()
+            # cv2.imshow('Clustered Edges', fb)
+            # cv2.waitKey(500)
         except Exception as e:
             print(e)
+            raise e
         finally:
             cv2.destroyAllWindows()
