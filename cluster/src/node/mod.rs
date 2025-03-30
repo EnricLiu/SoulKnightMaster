@@ -91,7 +91,7 @@ pub struct Node<const POOL_SIZE: usize> {
 }
 
 impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
-    const FB_INTERVAL_MS: u64 = 50; //ms
+    const FB_INTERVAL_MS: u64 = 100; //ms
     const STATUS_INTERVAL_MS: u64 = 500; //ms
     const FB_GUARD_INTERVAL_MS: u64 = 15; //s
     
@@ -211,7 +211,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                     _status.task_start();
                     let action = _action.read().await;
                     let curr_sn = _act_sn.load(Ordering::SeqCst);
-                    if curr_sn < action.sn() {
+                    if curr_sn != action.sn() {
                         if action.skill() {
                             let pos = _config.keymap_get("skill");
                             let res = _device.tap(pos).await
@@ -260,7 +260,7 @@ impl<const POOL_SIZE: usize> Node<POOL_SIZE> {
                     }
                     _status.task_end();
                     perf_log(&format!("[{name}] Action finished"), start);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
                 };
                 trace!("[{name}] Action task finished.");
                 Ok(())
