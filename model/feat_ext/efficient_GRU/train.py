@@ -3,101 +3,19 @@ import time
 import polars as pl
 import torch
 from torch import nn
-from SoulKnightMaster.model.feat_ext.dataset_test import ImageDataset, ImageDataset_Combine
-from torchinfo import summary
-
-import wandb
-from sklearn.metrics import confusion_matrix, roc_curve, auc, roc_auc_score, r2_score, mean_squared_error
-from dataset_test import SequenceImageDataset
 
 import os
 import numpy as np
 import torch.optim as optim
 from torchvision import models, transforms
-from torchvision.models import EfficientNet_V2_S_Weights,efficientnet_v2_s
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
+
+from efficient_GRU import MainModel, SequenceImageDataset
+from utils import freeze_model_weights
+
 # train_label = {0: "move", 1: "angle", 2: "attack", 3: "skill", 4: "weapon"}
 train_label = ["move", "angle", "attack", "skill"]
-
-# torch.autograd.set_detect_anomaly(True)
-################################################
-# 登录到 W&B
-wandb.login(key="")
-
-# 初始化 W&B 项目
-wandb.init(project="")
-################################################
-class MainModel(nn.Module):
-    def __init__(self, hidden_size=256,num_layers=1):
-        super(MainModel, self).__init__()
-        weights = EfficientNet_V2_S_Weights.DEFAULT
-        self.effi_net = efficientnet_v2_s(weights=weights)
-        in_features = self.effi_net.classifier[1].in_features  # 1280 for EfficientNet V2 S
-        print(f"Input size: {in_features}")
-        in_features_7 = self.effi_net.features[6][-1].out_channels
-        # print(f"Input size: {in_features}")
-        # print(f"Input size 7: {in_features_7}")
-        self.effi_net.classifier = nn.Identity()  # Remove original classifier
-
-        self.branches = nn.ModuleDict({
-            label: nn.ModuleDict({
-                'gru': nn.GRU(in_features, hidden_size, batch_first=True, num_layers=num_layers),
-                'classifier': nn.Sequential(
-                    nn.Linear(hidden_size, 1024),
-                    nn.BatchNorm1d(1024),
-                    nn.ReLU(),
-                    nn.Dropout(0.5),
-                    nn.Linear(1024, 512),
-                    nn.BatchNorm1d(512),
-                    nn.ReLU(),
-                    nn.Dropout(0.3),
-                    nn.Linear(512, 1)
-                )
-            }) for label in ["move", "angle", "attack", "skill"]
-        })
-
-    def forward(self, x):
-        batch_size, sequence_length, C, H, W = x.shape
-        # Reshape for EfficientNet: [batch_size * sequence_length, C, H, W]
-        x = x.view(batch_size * sequence_length, C, H, W)
-        features = self.effi_net(x)  # [batch_size * sequence_length, 1280]
-        # Reshape for GRU: [batch_size, sequence_length, 1280]
-        features = features.view(batch_size, sequence_length, -1)
-        out_list = []
-        # GRU processing
-        for idx, label in enumerate(train_label):
-            gru = self.branches[label]['gru']
-            classifier = self.branches[label]['classifier']
-            gru_out, _ = gru(features)  # [batch_size, sequence_length, hidden_size]
-            # Reshape for classifier: [batch_size * sequence_length, hidden_size]
-            gru_out = gru_out.reshape(batch_size * sequence_length, -1)
-            out = classifier(gru_out)  # [batch_size * sequence_length, 1]
-            # Reshape back: [batch_size, sequence_length, 1]
-            out = out.view(batch_size, sequence_length, 1)
-            # out_list[:, :, idx] = out.squeeze(-1)
-            out_list.append(out.squeeze(-1))
-
-        return torch.stack(out_list, dim=2)
-    def activate_branch(self, label):
-        # 冻结所有分支
-        for branch in self.branches.values():
-            for param in branch.parameters():
-                param.requires_grad = False
-        # 激活当前分支
-        for param in self.branches[label].parameters():
-            param.requires_grad = True
-
-
-def freeze_model_weights(model, freeze_until_layer=15):
-    for i in range(6):
-        for name, param in model.features[i].named_parameters():
-            param.requires_grad = False
-    freeze_until_layer = max(0, min(freeze_until_layer, 15))
-    for j in range(freeze_until_layer):
-        for name, param in model.features[6][j].named_parameters():
-            param.requires_grad = False
-
 
 # 训练过程
 def train(model, device, dataset,
@@ -108,31 +26,13 @@ def train(model, device, dataset,
         ckpt_path.mkdir(parents=True, exist_ok=True)
         if ckpt_path is None: return
         target = model
-###############################################################
-        wandb.unwatch(model)
-###############################################################
+        
         if save_state_dict: target = model.state_dict()
         torch.save(target, os.path.join(ckpt_path, f'{train_id}-ln={train_label[train_number]}-loss={_loss:.3f}-e{_epoch}.pth'))
         print(f'Checkpoint {_epoch} saved!')
-############################################################
-        wandb.watch(
-            model,
-            criterion=criterion,
-            log="all",
-            log_freq=100
-        )
-##########################################################
+        
     train_id = round(time.time())
-
     model.to(device)
-
-####################monitor######################
-    wandb.watch(
-        model,
-        log="all",
-        log_freq=100
-    )
-################################################
     criterions = [None] * len(train_label)
     def criterion(_train_number):
         if criterions[_train_number] is not None:
@@ -224,10 +124,7 @@ def train(model, device, dataset,
             train_loss = {k: v / len(train_loader) * batch_size for k, v in train_loss.items()}
 
             print(f"Epoch {epoch}, Loss: {train_loss}, Total: {sum(train_loss.values())}")
-
-            ###################################################################
-            wandb.log({"epoch": epoch, "train_loss": train_loss})
-            ###################################################################
+            
             model.eval()
             val_loss = {
                 "move": 0.0,
@@ -273,14 +170,6 @@ def train(model, device, dataset,
                 save_ckpt(val_loss, epoch)
             else:
                 print()
-            #######################################################################################
-            wandb.log({
-                "val_loss": val_loss,
-                "best_val_loss": best_loss,
-                "epoch": epoch
-            })
-
-    ########################################################################################
 
     except KeyboardInterrupt:
         print("Training interrupted by user.")
