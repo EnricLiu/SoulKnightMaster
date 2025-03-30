@@ -6,7 +6,7 @@ import time
 
 position_dict = {
     "blood": (51, 11, 230, 36),
-    "Shield": (51, 45, 230, 70),
+    "shield": (51, 45, 230, 70),
     "mana": (51, 78, 230, 103),
     "mini_map": (1060, 120, 1258, 321),
     "self": (1144, 204, 1176, 236)
@@ -50,7 +50,7 @@ def process_folder(folder_path):
 
             # 获取各区域值
             blood = results["blood"]
-            shield = results["Shield"]
+            shield = results["shield"]
             mana = results["mana"]
 
             # 传送门状态判断

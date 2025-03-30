@@ -5,7 +5,7 @@ import numpy as np
 import time
 position_dict = {
     "blood": (51, 11, 230, 36),
-    "Shield": (51, 45, 230, 70),
+    "shield": (51, 45, 230, 70),
     "mana": (51, 78, 230, 103),
     "mini_map": (1060, 120, 1258, 321),
     "self": (1144, 204, 1176, 236)
