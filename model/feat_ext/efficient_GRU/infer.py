@@ -4,12 +4,8 @@ import numpy as np
 import polars as pl
 from pathlib import Path
 from torchvision import transforms
-from SoulKnightMaster.model.feat_ext.dataset_test import ImageDataset
 from tqdm import tqdm
-import wandb
-import wandb.sklearn
-from combine_train import MainModel
-from dataset_test import SequenceImageDataset
+from efficient_GRU import MainModel, SequenceImageDataset
 
 from torch.utils.data import DataLoader, Subset
 sequence_length = 10

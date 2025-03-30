@@ -18,7 +18,7 @@ CKPT_PATH_COMBINE = Path("../ckpt/1741430443-ln=skill-loss=8.477-e3.pth")
 STATE_CONFIG = {
     "region_coords": {
         "blood": (51, 11, 230, 36),
-        "Shield": (51, 45, 230, 70),
+        "shield": (51, 45, 230, 70),
         "mana": (51, 78, 230, 103),
         "mini_map": (1060, 120, 1258, 321),
         "self": (1144, 204, 1176, 236)
@@ -114,7 +114,7 @@ class GameEnv(gym.Env):
         state["in_portal"] = self._check_portal_state(state)
         state["combat_state"] = state["self"] <= STATE_CONFIG["self_combat"]
         state["blood_level"] = self._quantize_value(state["blood"], STATE_CONFIG["thresholds"]["blood"])
-        state["shield_level"] = self._quantize_value(state["Shield"], STATE_CONFIG["thresholds"]["shield"])
+        state["shield_level"] = self._quantize_value(state["shield"], STATE_CONFIG["thresholds"]["shield"])
         state["mana_level"] = get_mana_percent(state["mana"])
 
         return state
@@ -169,8 +169,8 @@ class GameEnv(gym.Env):
 
     def _check_portal_state(self, state: dict) -> bool:
         """ 判断是否在传送门中 """
-        portal_cond1 = (state["blood"] == state["Shield"] == state["mana"])
-        portal_cond2 = (state["blood"] < 3e5 or state["Shield"] < 3e5 or state["mana"] < 3e5)
+        portal_cond1 = (state["blood"] == state["shield"] == state["mana"])
+        portal_cond2 = (state["blood"] < 3e5 or state["shield"] < 3e5 or state["mana"] < 3e5)
         return portal_cond1 or portal_cond2
 
     def _check_done_condition(self, state: dict) -> bool:
