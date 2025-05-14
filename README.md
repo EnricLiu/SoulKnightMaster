@@ -1,34 +1,37 @@
 # SoulKnightMaster
 
-SoulKnightMaster is a project that involves training and evaluating machine learning models for the game Soul Knight. This project includes various scripts and tools for data preprocessing, model training, and evaluation.
+## Overview
+SoulKnightMaster is a pure vision-based reinforcement learning project specializing in the game *Soul Knight*, with Proximal Policy Optimization (PPO) as its core algorithmic foundation. The system leverages PPO for game agent training while integrating Rust-based cluster management and Python machine learning pipelines to enable efficient distributed training and game data processing.
 
-## Project Structure
+## Directory Structure
+```
+├── cluster/       Rust-based cluster management system
+├── interface/     Python API interfaces and controllers
+├── model/         Machine learning models (ResNet, GRU, etc.)
+├── tools/         Utility tools for data processing and analysis
+├── train/         Training frameworks and utilities
+└── LICENSE        MIT license file
+```
 
-The project is organized into the following directories:
+## Key Components
+### Cluster Module (`cluster/`)
+- **ADB Client**: Android Debug Bridge interface for device communication
+- **Node Management**: Real-time status monitoring and health checks
+- **API Server**: RESTful service built with Axum framework
+- **Config**: JSON-based configuration system (`configs/*.json`)
 
-- `model/feat_ext/`: Contains feature extraction models and related scripts.
-  - `pre_train_resnet/`: Scripts for pre-training ResNet models.
-  - `efficient_GRU/`: Scripts for training and evaluating Efficient GRU models.
-- `train/`: Contains training scripts and utilities.
-  - `httb/`: HTTP client-related scripts.
-  - `utils/`: Utility scripts for training.
-- `tools/replay_recorder/`: Tools for recording and processing game replays.
-- `cluster/`: Contains scripts for managing and monitoring a cluster of nodes.
+### Machine Learning Models (`model/`)
+- **Feature Extraction**: 
+  - Efficient GRU for sequence modeling
+  - Pre-trained ResNet for image feature extraction
+- **Training Frameworks**: 
+  - PPO reinforcement learning implementation
+  - Full-frame training modules
 
-## Setup
+### Tools Suite (`tools/`)
+- **Replay Recorder**: Game session capture and analysis
+- **PSD Parser**: Photoshop file processing for game assets
+- **Recognition Tools**: Image/video analysis utilities
 
-### Prerequisites
-
-- Python 3.8 or higher
-- PyTorch
-- torchvision
-- polars
-- tqdm
-- wandb
-- OpenCV
-- PIL
-- numpy
-- scikit-learn
-- gym
-- stable-baselines3
-
+## License
+MIT License - see [LICENSE](LICENSE) file for details
